@@ -1,4 +1,5 @@
 use crate::common::errors::ProxyError;
+use bytemuck::cast_slice;
 use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
 
@@ -7,13 +8,39 @@ pub fn encode(
   format: &str,
   quality: u32,
 ) -> Result<(Vec<u8>, String), ProxyError> {
-  if format == "avif" {
-    return Err(ProxyError::AvifNotSupported);
-  }
-
   let (fmt, content_type) = match format {
     "webp" => (ImageFormat::WebP, "image/webp"),
     "png" => (ImageFormat::Png, "image/png"),
+    "gif" => (ImageFormat::Gif, "image/gif"),
+    "bmp" => (ImageFormat::Bmp, "image/bmp"),
+    "tiff" => (ImageFormat::Tiff, "image/tiff"),
+    "ico" => (ImageFormat::Ico, "image/x-icon"),
+    "avif" => {
+      let rgba = img.to_rgba8();
+      let (width, height) = rgba.dimensions();
+      let px: &[ravif::RGBA8] = cast_slice(rgba.as_raw());
+      let buf = ravif::Img::new(px, width as usize, height as usize);
+      let encoded = ravif::Encoder::new()
+        .with_quality(quality as f32)
+        .with_speed(6)
+        .encode_rgba(buf)
+        .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+      return Ok((encoded.avif_file.to_vec(), "image/avif".to_string()));
+    }
+    "jxl" => {
+      use jpegxl_rs::{encode::EncoderFrame, encoder_builder};
+      let rgba = img.to_rgba8();
+      let (width, height) = rgba.dimensions();
+      let mut encoder = encoder_builder()
+        .has_alpha(true)
+        .build()
+        .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+      let frame = EncoderFrame::new(rgba.as_raw()).num_channels(4);
+      let result = encoder
+        .encode_frame::<u8, u8>(&frame, width, height)
+        .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+      return Ok((result.to_vec(), "image/jxl".to_string()));
+    }
     _ => (ImageFormat::Jpeg, "image/jpeg"),
   };
 
@@ -56,12 +83,50 @@ mod tests {
   }
 
   #[test]
-  fn test_encode_avif_returns_error() {
+  fn test_encode_gif() {
     let img = DynamicImage::new_rgb8(2, 2);
-    let result = encode(img, "avif", 85);
-    assert!(matches!(
-      result,
-      Err(crate::common::errors::ProxyError::AvifNotSupported)
-    ));
+    let (bytes, ct) = encode(img, "gif", 85).unwrap();
+    assert_eq!(ct, "image/gif");
+    assert_eq!(&bytes[..3], b"GIF");
+  }
+
+  #[test]
+  fn test_encode_bmp() {
+    let img = DynamicImage::new_rgb8(2, 2);
+    let (bytes, ct) = encode(img, "bmp", 85).unwrap();
+    assert_eq!(ct, "image/bmp");
+    assert_eq!(&bytes[..2], b"BM");
+  }
+
+  #[test]
+  fn test_encode_tiff() {
+    let img = DynamicImage::new_rgb8(2, 2);
+    let (bytes, ct) = encode(img, "tiff", 85).unwrap();
+    assert_eq!(ct, "image/tiff");
+    assert!(bytes.starts_with(b"II") || bytes.starts_with(b"MM"));
+  }
+
+  #[test]
+  fn test_encode_ico() {
+    let img = DynamicImage::new_rgb8(16, 16);
+    let (bytes, ct) = encode(img, "ico", 85).unwrap();
+    assert_eq!(ct, "image/x-icon");
+    assert_eq!(&bytes[..4], &[0x00, 0x00, 0x01, 0x00]);
+  }
+
+  #[test]
+  fn test_encode_avif() {
+    let img = DynamicImage::new_rgb8(2, 2);
+    let (bytes, ct) = encode(img, "avif", 85).unwrap();
+    assert_eq!(ct, "image/avif");
+    assert!(!bytes.is_empty());
+  }
+
+  #[test]
+  fn test_encode_jxl() {
+    let img = DynamicImage::new_rgb8(4, 4);
+    let (bytes, ct) = encode(img, "jxl", 85).unwrap();
+    assert_eq!(ct, "image/jxl");
+    assert!(!bytes.is_empty());
   }
 }

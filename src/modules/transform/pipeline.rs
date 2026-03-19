@@ -9,12 +9,24 @@ use tokio::task::spawn_blocking;
 pub fn resolve_content_type(header: Option<&str>, bytes: &[u8]) -> Result<String, ProxyError> {
   match header {
     Some(ct) if ct.starts_with("image/") => Ok(ct.to_string()),
+    Some("application/pdf") => Ok("application/pdf".to_string()),
     Some(_) => Err(ProxyError::NotAnImage),
     None => {
       if let Some(kind) = infer::get(bytes) {
-        if kind.mime_type().starts_with("image/") {
+        if kind.mime_type().starts_with("image/") || kind.mime_type() == "application/pdf" {
           return Ok(kind.mime_type().to_string());
         }
+      }
+      if bytes.starts_with(b"%PDF") {
+        return Ok("application/pdf".to_string());
+      }
+      if bytes.starts_with(&[0xFF, 0x0A])
+        || bytes.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20])
+      {
+        return Ok("image/jxl".to_string());
+      }
+      if bytes.starts_with(b"8BPS") {
+        return Ok("image/vnd.adobe.photoshop".to_string());
       }
       Err(ProxyError::NotAnImage)
     }
@@ -37,9 +49,10 @@ pub async fn run_pipeline(
 ) -> Result<(Vec<u8>, String), ProxyError> {
   // 1. Validate content-type
   let resolved_ct = resolve_content_type(src_content_type.as_deref(), &src_bytes)?;
+  let is_document = resolved_ct == "application/pdf";
 
   // 2. Passthrough: no transforms → return as-is with resolved content-type
-  if !params.has_transforms() {
+  if !params.has_transforms() && !is_document {
     return Ok((src_bytes, resolved_ct));
   }
 
@@ -57,8 +70,9 @@ pub async fn run_pipeline(
 
   // 4. Run synchronous image ops in spawn_blocking
   let params_clone = params.clone();
+  let resolved_ct_clone = resolved_ct.clone();
   let result = spawn_blocking(move || -> Result<(Vec<u8>, String), ProxyError> {
-    let mut img = load_image(&src_bytes)?;
+    let mut img = crate::modules::transform::ops::decode::dispatch(&resolved_ct_clone, &src_bytes)?;
 
     // Resize
     let fit = params_clone.fit.as_deref().unwrap_or("contain");
@@ -171,5 +185,18 @@ mod tests {
       .await
       .unwrap();
     assert!(ct.starts_with("image/"));
+  }
+
+  #[test]
+  fn test_pdf_content_type_accepted_in_resolve() {
+    let result = resolve_content_type(Some("application/pdf"), b"%PDF-1.4 fake");
+    assert!(result.is_ok(), "application/pdf should be accepted");
+  }
+
+  #[test]
+  fn test_jxl_magic_bytes_detected() {
+    let jxl_magic = &[0xFF, 0x0A, 0x00, 0x00];
+    let result = resolve_content_type(None, jxl_magic);
+    assert!(result.is_ok(), "JXL magic bytes should be detected");
   }
 }
