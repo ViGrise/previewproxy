@@ -22,6 +22,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config cmake nasm ffmpeg \
+            libdav1d-dev libheif-dev libjxl-dev
+
       - name: Run tests
         run: cargo test
 
@@ -57,11 +64,18 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install cross-compiler (aarch64 linux)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Install native dependencies (linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config cmake nasm \
+            libdav1d-dev libheif-dev libjxl-dev \
+            ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'gcc-aarch64-linux-gnu' || '' }}
+
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config cmake nasm dav1d jpeg-xl libheif
 
       - name: Build
         env:
