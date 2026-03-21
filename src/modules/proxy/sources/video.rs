@@ -100,7 +100,7 @@ mod tests {
         assert!(!is_video_magic(&bytes));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn test_extract_frame_ffmpeg_not_found() {
         let original_path = std::env::var("PATH").unwrap_or_default();
         // SAFETY: test-only, single-threaded context for env mutation.
@@ -121,6 +121,20 @@ mod tests {
         assert!(
             matches!(result, Err(crate::common::errors::ProxyError::VideoDecodeError)),
             "expected VideoDecodeError for non-video input"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_extract_frame_empty_stdout_returns_error() {
+        // Write valid tempfile bytes but pass /dev/null as ffmpeg input.
+        // ffmpeg will exit 0 but produce no video output → empty stdout.
+        // We simulate this by writing a valid PNG (not a video) and checking
+        // that even if ffmpeg exits non-zero or produces empty stdout we get VideoDecodeError.
+        // The easiest way: pass an empty byte slice — ffmpeg will fail producing empty stdout.
+        let result = extract_frame(&[], 0.0).await;
+        assert!(
+            matches!(result, Err(crate::common::errors::ProxyError::VideoDecodeError)),
+            "expected VideoDecodeError for empty input"
         );
     }
 
