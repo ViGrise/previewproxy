@@ -18,7 +18,8 @@ A fast, self-hosted HTTP image proxy written in Rust. Fetch remote images by URL
 - **Security** — allowlist of trusted domains + optional HMAC request signing
 - **SSRF protection** — private IP blocking, per-hop allowlist re-validation on redirects
 - **Structured JSON logging** via [tracing](https://github.com/tokio-rs/tracing)
-- **Docker** support with multi-stage builds (pure Rust, no system dependencies)
+- **Video thumbnail extraction** — extract a frame from MP4, MKV, AVI and pass it through the normal transform pipeline
+- **Docker** support with multi-stage builds (requires `ffmpeg` at runtime)
 
 ## Request Styles
 
@@ -60,6 +61,7 @@ Query params take precedence when both styles are combined.
 | `contrast` | -100 to 100                     | Contrast adjustment                  |
 | `blur`     | float (sigma)                   | Gaussian blur                        |
 | `wm`       | URL                             | Watermark image URL                  |
+| `t`        | float (seconds, default: 0)     | Video seek time for frame extraction |
 | `sig`      | string                          | HMAC-SHA256 signature (if required)  |
 
 ## API Endpoints
@@ -164,6 +166,13 @@ HMAC-SHA256(key, canonical_string)
 where `canonical_string` is alphabetically sorted `key=value` pairs (excluding `sig`) joined by `&`, followed by `:` and the decoded image URL. Encode the result as URL-safe base64 (no padding) and pass it as the `sig` parameter.
 
 ## Development
+
+**Runtime dependency:** video thumbnail extraction requires the `ffmpeg` binary in `$PATH`.
+
+```shell
+# Ubuntu / Debian
+sudo apt install ffmpeg
+```
 
 ```shell
 # Start dev server
