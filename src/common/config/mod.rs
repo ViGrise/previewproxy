@@ -37,6 +37,8 @@ pub struct Configuration {
   // Local filesystem source
   pub local_enabled: bool,
   pub local_base_dir: Option<String>,
+  // Video
+  pub ffmpeg_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,6 +118,7 @@ impl Configuration {
       s3_endpoint: env_var_opt("S3_ENDPOINT"),
       local_enabled: env_var_bool("LOCAL_ENABLED"),
       local_base_dir: env_var_opt("LOCAL_BASE_DIR"),
+      ffmpeg_path: std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string()),
     });
     if cfg.hmac_key.is_none() {
       tracing::warn!("HMAC_KEY is not set — all requests are unauthenticated");
@@ -183,6 +186,7 @@ impl std::fmt::Debug for Configuration {
       .field("s3_endpoint", &self.s3_endpoint)
       .field("local_enabled", &self.local_enabled)
       .field("local_base_dir", &self.local_base_dir)
+      .field("ffmpeg_path", &self.ffmpeg_path)
       .finish()
   }
 }

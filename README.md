@@ -122,6 +122,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags — 
 | `--cache-disk-ttl-secs` | `CACHE_DISK_TTL_SECS` | `86400` | L2 cache TTL (seconds) |
 | `--cache-disk-max-mb` | `CACHE_DISK_MAX_MB` | — | L2 disk cache size limit (MB); empty = unlimited |
 | `--cache-cleanup-interval-secs` | `CACHE_CLEANUP_INTERVAL_SECS` | `600` | Background cleanup interval (seconds) |
+| `--ffmpeg-path` | `FFMPEG_PATH` | `ffmpeg` | Path to the ffmpeg binary |
 
 ---
 
@@ -141,6 +142,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags — 
 | `CACHE_DISK_TTL_SECS`         | `86400`              | L2 cache TTL                                          |
 | `CACHE_DISK_MAX_MB`           | —                    | L2 disk cache size limit; empty = unlimited           |
 | `CACHE_CLEANUP_INTERVAL_SECS` | `600`                | Background cleanup interval                           |
+| `FFMPEG_PATH`                 | `ffmpeg`             | Path to the ffmpeg binary for video frame extraction  |
 | `RUST_LOG`                    | `server=info,...`    | Log level filter                                      |
 
 ## Security

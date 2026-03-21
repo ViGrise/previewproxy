@@ -13,6 +13,7 @@ pub struct ProxyService {
   cache: Arc<CacheManager>,
   allowlist: Allowlist,
   hmac_key: Option<String>,
+  ffmpeg_path: String,
 }
 
 impl ProxyService {
@@ -23,6 +24,7 @@ impl ProxyService {
       cache: state.cache.clone(),
       allowlist,
       hmac_key: state.cfg.hmac_key.clone(),
+      ffmpeg_path: state.cfg.ffmpeg_path.clone(),
     }
   }
 
@@ -102,7 +104,7 @@ impl ProxyService {
       .unwrap_or_else(|| crate::modules::proxy::sources::video::is_video_magic(&src_bytes));
 
     if is_video {
-      match crate::modules::proxy::sources::video::extract_frame(&src_bytes, params.t.unwrap_or(0.0)).await {
+      match crate::modules::proxy::sources::video::extract_frame(&src_bytes, params.t.unwrap_or(0.0), &self.ffmpeg_path).await {
         Ok(frame) => match crate::modules::proxy::sources::video::frame_to_png_bytes(frame) {
           Ok(png_bytes) => {
             src_bytes = png_bytes;
@@ -190,6 +192,7 @@ mod tests {
       s3_endpoint: None,
       local_enabled: false,
       local_base_dir: None,
+      ffmpeg_path: "ffmpeg".to_string(),
     })
   }
 
@@ -217,6 +220,7 @@ mod tests {
       cache,
       allowlist: Allowlist::new(allowed_hosts),
       hmac_key: None,
+      ffmpeg_path: "ffmpeg".to_string(),
     }
   }
 
@@ -275,6 +279,7 @@ mod tests {
       cache,
       allowlist: Allowlist::new(vec![]),
       hmac_key: None,
+      ffmpeg_path: "ffmpeg".to_string(),
     };
 
     let params = TransformParams::default();

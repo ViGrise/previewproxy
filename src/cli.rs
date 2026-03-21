@@ -51,6 +51,10 @@ pub struct Cli {
   /// Cache cleanup interval in seconds [env: CACHE_CLEANUP_INTERVAL_SECS]
   #[arg(long, env = "CACHE_CLEANUP_INTERVAL_SECS", default_value = "600")]
   pub cache_cleanup_interval_secs: u64,
+
+  /// Path to the ffmpeg binary [env: FFMPEG_PATH]
+  #[arg(long, env = "FFMPEG_PATH", default_value = "ffmpeg")]
+  pub ffmpeg_path: String,
 }
 
 impl Cli {
@@ -74,6 +78,7 @@ impl Cli {
         "CACHE_CLEANUP_INTERVAL_SECS",
         self.cache_cleanup_interval_secs.to_string(),
       );
+      std::env::set_var("FFMPEG_PATH", &self.ffmpeg_path);
     }
   }
 }

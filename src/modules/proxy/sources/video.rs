@@ -27,17 +27,17 @@ pub fn frame_to_png_bytes(img: DynamicImage) -> Result<Vec<u8>, ProxyError> {
 
 /// Extract a single frame at t_secs from video bytes using the ffmpeg CLI.
 ///
-/// Spawns `ffmpeg -ss <t_secs> -i <tmpfile> -vframes 1 -f image2 -vcodec png pipe:1`.
+/// Spawns `<ffmpeg_bin> -ss <t_secs> -i <tmpfile> -vframes 1 -f image2 -vcodec png pipe:1`.
 /// Uses a fast keyframe seek (-ss before -i); the extracted frame is the nearest
 /// prior keyframe, not frame-accurate. Acceptable for preview thumbnail generation.
-pub async fn extract_frame(bytes: &[u8], t_secs: f32) -> Result<DynamicImage, ProxyError> {
+pub async fn extract_frame(bytes: &[u8], t_secs: f32, ffmpeg_bin: &str) -> Result<DynamicImage, ProxyError> {
     // Write bytes to a temp file. Hold the handle alive until ffmpeg exits.
     let tmp = tempfile::NamedTempFile::new()
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;
     std::fs::write(tmp.path(), bytes)
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;
 
-    let output = tokio::process::Command::new("ffmpeg")
+    let output = tokio::process::Command::new(ffmpeg_bin)
         .args([
             "-ss", &t_secs.to_string(),
             "-i", tmp.path().to_str().unwrap_or(""),
@@ -51,7 +51,7 @@ pub async fn extract_frame(bytes: &[u8], t_secs: f32) -> Result<DynamicImage, Pr
         .await
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                tracing::warn!("ffmpeg not found in PATH: {e}");
+                tracing::warn!("ffmpeg binary not found at {ffmpeg_bin:?}: {e}");
             } else {
                 tracing::warn!("ffmpeg spawn error: {e}");
             }
@@ -106,7 +106,7 @@ mod tests {
         // SAFETY: test-only, single-threaded context for env mutation.
         unsafe { std::env::set_var("PATH", "") };
         let bytes = vec![0u8; 32];
-        let result = extract_frame(&bytes, 0.0).await;
+        let result = extract_frame(&bytes, 0.0, "ffmpeg").await;
         unsafe { std::env::set_var("PATH", original_path) };
         assert!(
             matches!(result, Err(crate::common::errors::ProxyError::VideoDecodeError)),
@@ -117,7 +117,7 @@ mod tests {
     #[tokio::test]
     async fn test_extract_frame_invalid_video_returns_error() {
         let bytes = b"this is not a video file at all".to_vec();
-        let result = extract_frame(&bytes, 0.0).await;
+        let result = extract_frame(&bytes, 0.0, "ffmpeg").await;
         assert!(
             matches!(result, Err(crate::common::errors::ProxyError::VideoDecodeError)),
             "expected VideoDecodeError for non-video input"
@@ -131,7 +131,7 @@ mod tests {
         // We simulate this by writing a valid PNG (not a video) and checking
         // that even if ffmpeg exits non-zero or produces empty stdout we get VideoDecodeError.
         // The easiest way: pass an empty byte slice — ffmpeg will fail producing empty stdout.
-        let result = extract_frame(&[], 0.0).await;
+        let result = extract_frame(&[], 0.0, "ffmpeg").await;
         assert!(
             matches!(result, Err(crate::common::errors::ProxyError::VideoDecodeError)),
             "expected VideoDecodeError for empty input"
@@ -142,7 +142,7 @@ mod tests {
     #[ignore = "requires ffmpeg binary in PATH and tests/fixtures/minimal.mp4"]
     async fn test_extract_frame() {
         let bytes = std::fs::read("tests/fixtures/minimal.mp4").unwrap();
-        let img = extract_frame(&bytes, 0.0).await.unwrap();
+        let img = extract_frame(&bytes, 0.0, "ffmpeg").await.unwrap();
         assert!(img.width() > 0 && img.height() > 0);
     }
 }
