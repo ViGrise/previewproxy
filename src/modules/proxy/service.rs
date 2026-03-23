@@ -6,6 +6,7 @@ use crate::modules::security::{allowlist::Allowlist, hmac};
 use crate::modules::transform::pipeline::{self, resolve_content_type};
 use crate::modules::AppState;
 use std::sync::Arc;
+use tokio::sync::OwnedSemaphorePermit;
 use url::Url;
 
 pub struct ProxyService {
@@ -32,6 +33,7 @@ impl ProxyService {
     &self,
     params: TransformParams,
     image_url: String,
+    _permit: OwnedSemaphorePermit, // temporary: will be used in streaming path (Task 5)
   ) -> Result<(CacheEntry, CacheHit), ProxyError> {
     // 1. Allowlist check for image URL host (HTTP/HTTPS only)
     if image_url.starts_with("http://") || image_url.starts_with("https://") {
@@ -239,7 +241,13 @@ mod tests {
     // Allowlist only allows "example.com"; s3:/ URL should bypass allowlist entirely.
     let svc = make_service_with_allowlist(vec!["example.com".to_string()]);
     let params = TransformParams::default();
-    let result = svc.process(params, "s3:/some/key.jpg".to_string()).await;
+    let result = svc
+      .process(
+        params,
+        "s3:/some/key.jpg".to_string(),
+        Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().unwrap(),
+      )
+      .await;
     // Should NOT be HostNotAllowed - it should reach the fetcher and return the mock error.
     assert!(
       !matches!(result, Err(ProxyError::HostNotAllowed)),
@@ -259,7 +267,11 @@ mod tests {
       ..TransformParams::default()
     };
     let result = svc
-      .process(params, "s3:/images/photo.jpg".to_string())
+      .process(
+        params,
+        "s3:/images/photo.jpg".to_string(),
+        Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().unwrap(),
+      )
       .await;
     assert!(
       !matches!(result, Err(ProxyError::HostNotAllowed)),
@@ -294,7 +306,11 @@ mod tests {
 
     let params = TransformParams::default();
     let result = svc
-      .process(params, "https://example.com/v.mp4".to_string())
+      .process(
+        params,
+        "https://example.com/v.mp4".to_string(),
+        Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().unwrap(),
+      )
       .await;
     assert!(
       matches!(result, Err(ProxyError::VideoDecodeError)),
