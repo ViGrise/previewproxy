@@ -122,6 +122,52 @@ impl HttpFetcher {
     }
     Ok(buf)
   }
+
+  /// Returns the reqwest::Response after header checks, without reading the body.
+  /// Caller is responsible for reading or streaming the body.
+  pub async fn fetch_streaming(&self, url: &str) -> Result<reqwest::Response, ProxyError> {
+    if self.check_private_ips {
+      let parsed = url::Url::parse(url)
+        .map_err(|_| ProxyError::InvalidParams("invalid URL".to_string()))?;
+      let host = parsed.host_str().unwrap_or("");
+      if let Ok(addrs) = tokio::net::lookup_host(format!("{}:80", host)).await {
+        for addr in addrs {
+          if is_private_ip(addr.ip()) {
+            return Err(ProxyError::HostNotAllowed);
+          }
+        }
+      }
+    }
+
+    let resp = self.client.get(url).send().await.map_err(|e| {
+      if e.is_timeout() {
+        ProxyError::UpstreamTimeout
+      } else if e.is_redirect() {
+        ProxyError::TooManyRedirects
+      } else {
+        let msg = e.to_string();
+        if msg.contains("too_many_redirects") {
+          ProxyError::TooManyRedirects
+        } else if msg.contains("host_not_allowed") {
+          ProxyError::HostNotAllowed
+        } else {
+          ProxyError::InternalError(msg)
+        }
+      }
+    })?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+      return Err(ProxyError::UpstreamNotFound);
+    }
+    if !resp.status().is_success() {
+      return Err(ProxyError::InternalError(format!(
+        "Upstream returned {}",
+        resp.status()
+      )));
+    }
+
+    Ok(resp)
+  }
 }
 
 #[cfg(test)]
@@ -190,5 +236,38 @@ mod tests {
     let (bytes, ct) = open_fetcher().fetch(&server.uri()).await.unwrap();
     assert_eq!(bytes.len(), 5);
     assert!(ct.is_none());
+  }
+
+  #[tokio::test]
+  async fn test_fetch_streaming_returns_200_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_bytes(vec![0u8; 20])
+          .insert_header("content-type", "image/png"),
+      )
+      .mount(&server)
+      .await;
+    let fetcher = open_fetcher();
+    let resp = fetcher.fetch_streaming(&server.uri()).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let ct = resp
+      .headers()
+      .get("content-type")
+      .and_then(|v| v.to_str().ok())
+      .unwrap_or("");
+    assert!(ct.contains("image/png"));
+  }
+
+  #[tokio::test]
+  async fn test_fetch_streaming_404_is_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+    let result = open_fetcher().fetch_streaming(&server.uri()).await;
+    assert!(matches!(result, Err(ProxyError::UpstreamNotFound)));
   }
 }
