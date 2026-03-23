@@ -99,6 +99,7 @@ jobs:
       - name: Build
         env:
           VCPKG_ROOT: ${{ runner.os == 'Windows' && 'C:\vcpkg' || '' }}
+          PKG_CONFIG_PATH: ${{ runner.os == 'Windows' && 'C:\vcpkg\installed\x64-windows-static-md\lib\pkgconfig' || '' }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename binary
