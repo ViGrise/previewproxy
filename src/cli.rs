@@ -66,6 +66,10 @@ pub struct Cli {
   #[arg(long, env = "FFMPEG_PATH", default_value = "ffmpeg")]
   pub ffmpeg_path: String,
 
+  /// Path to the ffprobe binary (defaults to ffprobe in same dir as ffmpeg) [env: FFPROBE_PATH]
+  #[arg(long, env = "FFPROBE_PATH", default_value = "")]
+  pub ffprobe_path: String,
+
   /// Comma-separated allowed CORS origins; * = allow all [env: CORS_ALLOW_ORIGIN]
   #[arg(long, env = "CORS_ALLOW_ORIGIN", default_value = "*")]
   pub cors_allow_origin: String,
@@ -97,6 +101,7 @@ impl Cli {
         self.cache_cleanup_interval_secs.to_string(),
       );
       std::env::set_var("FFMPEG_PATH", &self.ffmpeg_path);
+      std::env::set_var("FFPROBE_PATH", &self.ffprobe_path);
       std::env::set_var("CORS_ALLOW_ORIGIN", &self.cors_allow_origin);
       std::env::set_var("CORS_MAX_AGE_SECS", self.cors_max_age_secs.to_string());
     }
