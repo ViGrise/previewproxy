@@ -146,11 +146,11 @@ impl ProxyService {
           while let Some(chunk) = s.next().await {
             match chunk {
               Ok(b) => {
-                let _ = cache_tx.send(Ok(b.clone())).await;
-                if client_tx.send(b).await.is_err() {
+                if client_tx.send(b.clone()).await.is_err() {
                   let _ = cache_tx.send(Err(ProxyError::InternalError("client_disconnected".to_string()))).await;
                   return;
                 }
+                let _ = cache_tx.send(Ok(b)).await;
               }
               Err(e) => {
                 let pe = ProxyError::InternalError(e.to_string());
@@ -209,7 +209,6 @@ impl ProxyService {
       }
     }
     // --- End streaming path (video/PDF fell through to here) ---
-    drop(permit);
 
     // 7. Fetch (Issue 4 fix: pass original error to guard)
     let fetch_result = self.fetcher.fetch(&image_url).await;
