@@ -57,10 +57,10 @@ Query params take precedence when both styles are combined.
 | `grayscale` | `true`                       | Convert to grayscale                 |
 | `bright`    | -100 to 100                  | Brightness adjustment                |
 | `contrast`  | -100 to 100                  | Contrast adjustment                  |
-| `blur`      | float (sigma)                | Gaussian blur                        |
-| `wm`        | URL                          | Watermark image URL                  |
-| `t`         | float (seconds, default: 0)  | Video seek time for frame extraction |
-| `sig`       | string                       | HMAC-SHA256 signature (if required)  |
+| `blur`      | float (sigma)                        | Gaussian blur                                    |
+| `wm`        | URL                                  | Watermark image URL                              |
+| `seek`      | `5.0`, `0.5r`, `auto` (default: `0`) | Video seek: absolute seconds, relative ratio, or auto (middle frame) |
+| `sig`       | string                               | HMAC-SHA256 signature (if required)              |
 
 ## API Endpoints
 
@@ -138,6 +138,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags - CL
 | `--cache-disk-max-mb`           | `CACHE_DISK_MAX_MB`           | -                   | L2 disk cache size limit (MB); empty = unlimited                                                                  |
 | `--cache-cleanup-interval-secs` | `CACHE_CLEANUP_INTERVAL_SECS` | `600`               | Background cleanup interval (seconds)                                                                             |
 | `--ffmpeg-path`                 | `FFMPEG_PATH`                 | `ffmpeg`            | Path to the ffmpeg binary                                                                                         |
+| `--ffprobe-path`                | `FFPROBE_PATH`                | (same dir as ffmpeg) | Path to the ffprobe binary; defaults to `ffprobe` in the same directory as ffmpeg                                |
 | `--cors-allow-origin`           | `CORS_ALLOW_ORIGIN`           | `*`                 | Comma-separated allowed CORS origins; `*` = allow all; wildcards (`*.example.com`) match a single subdomain label |
 | `--cors-max-age-secs`           | `CORS_MAX_AGE_SECS`           | `600`               | CORS preflight cache duration (seconds)                                                                           |
 | -                               | `RUST_LOG`                    | `server=info,...`   | Log level filter                                                                                                  |
@@ -186,7 +187,7 @@ Private, loopback, link-local, and reserved IP ranges (RFC 1918, RFC 6598, IPv6 
 
 **Runtime**
 
-- `ffmpeg` - video frame extraction (`apt install ffmpeg` / `brew install ffmpeg`)
+- `ffmpeg` + `ffprobe` - video frame extraction and duration probing (`apt install ffmpeg` / `brew install ffmpeg`)
 
 **Build-time native libs**
 
