@@ -11,7 +11,7 @@ $BinName = "previewproxy.exe"
 # Detect architecture
 $Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
   "AMD64" { "x86_64" }
-  "ARM64" { "aarch64" }
+  "ARM64" { "arm64" }
   default { Write-Error "Unsupported architecture: $env:PROCESSOR_ARCHITECTURE"; exit 1 }
 }
 

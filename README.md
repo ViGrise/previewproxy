@@ -18,7 +18,6 @@ A fast, self-hosted image proxy written in Rust. Fetch images from HTTP URLs, S3
 - **Multi-tier cache** - L1 in-memory (moka) + L2 disk with singleflight dedup
 - **Security** - domain allowlist, optional HMAC request signing, configurable CORS origins, SSRF protection (private IP blocking, per-hop allowlist re-validation on redirects)
 - **Video thumbnail extraction** - extract a frame from MP4, MKV, AVI and pass it through the normal transform pipeline
-- **Structured JSON logging** via [tracing](https://github.com/tokio-rs/tracing)
 
 ## Request Styles
 
