@@ -7,6 +7,7 @@ use crate::modules::security::allowlist::Allowlist;
 use crate::modules::AppState;
 use axum::Router;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 pub async fn router(cfg: Config, cache: Arc<CacheManager>) -> Router {
   let allowlist = Arc::new(Allowlist::new(cfg.allowed_hosts.clone()));
@@ -15,6 +16,7 @@ pub async fn router(cfg: Config, cache: Arc<CacheManager>) -> Router {
     HttpFetcher::new(cfg.fetch_timeout_secs, cfg.max_source_bytes, allowlist)
       .with_private_ip_check(check_private),
   );
+  let http_fetcher = http.clone(); // clone before http is moved into SourceRouter
 
   let s3 = if cfg.s3_enabled {
     Some(Arc::new(S3Source::new(
@@ -43,10 +45,14 @@ pub async fn router(cfg: Config, cache: Arc<CacheManager>) -> Router {
 
   let cors_layer = middlewares::cors_layer(&cfg.cors_allow_origin, cfg.cors_max_age_secs);
 
+  let concurrency = Arc::new(Semaphore::new(cfg.max_concurrent_requests));
+
   let app_state = AppState {
     cfg,
     cache,
     fetcher,
+    http_fetcher,
+    concurrency,
   };
 
   let trace_layer = telemetry::trace_layer();
