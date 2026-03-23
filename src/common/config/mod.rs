@@ -214,8 +214,13 @@ impl std::fmt::Debug for Configuration {
 
 #[cfg(test)]
 mod tests {
+  use std::sync::Mutex;
+  // Serialize all tests that mutate env vars to prevent cross-test pollution.
+  static ENV_LOCK: Mutex<()> = Mutex::new(());
+
   #[test]
   fn test_config_new() {
+    let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
     std::env::remove_var("MAX_CONCURRENT_REQUESTS");
@@ -238,6 +243,7 @@ mod tests {
 
   #[test]
   fn test_max_concurrent_requests_default() {
+    let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
     std::env::remove_var("MAX_CONCURRENT_REQUESTS");
@@ -247,21 +253,25 @@ mod tests {
 
   #[test]
   fn test_max_concurrent_requests_from_env() {
+    let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
     std::env::set_var("MAX_CONCURRENT_REQUESTS", "64");
     let cfg = super::Configuration::new();
+    std::env::remove_var("MAX_CONCURRENT_REQUESTS");
     assert_eq!(cfg.max_concurrent_requests, 64);
   }
 
   #[test]
   fn test_max_concurrent_requests_zero_panics() {
+    let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
     std::env::set_var("MAX_CONCURRENT_REQUESTS", "0");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       super::Configuration::new();
     }));
+    std::env::remove_var("MAX_CONCURRENT_REQUESTS");
     assert!(result.is_err(), "Expected Configuration::new() to panic");
   }
 }
