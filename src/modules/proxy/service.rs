@@ -24,7 +24,11 @@ impl std::fmt::Debug for ProcessResult {
     match self {
       ProcessResult::Cached(_, _) => write!(f, "ProcessResult::Cached"),
       ProcessResult::Stream { content_type, .. } => {
-        write!(f, "ProcessResult::Stream {{ content_type: {:?} }}", content_type)
+        write!(
+          f,
+          "ProcessResult::Stream {{ content_type: {:?} }}",
+          content_type
+        )
       }
     }
   }
@@ -37,6 +41,7 @@ pub struct ProxyService {
   allowlist: Allowlist,
   hmac_key: Option<String>,
   ffmpeg_path: String,
+  ffprobe_path: String,
   max_source_bytes: u64,
 }
 
@@ -50,6 +55,7 @@ impl ProxyService {
       allowlist,
       hmac_key: state.cfg.hmac_key.clone(),
       ffmpeg_path: state.cfg.ffmpeg_path.clone(),
+      ffprobe_path: state.cfg.ffprobe_path.clone(),
       max_source_bytes: state.cfg.max_source_bytes,
     }
   }
@@ -147,7 +153,11 @@ impl ProxyService {
             match chunk {
               Ok(b) => {
                 if client_tx.send(b.clone()).await.is_err() {
-                  let _ = cache_tx.send(Err(ProxyError::InternalError("client_disconnected".to_string()))).await;
+                  let _ = cache_tx
+                    .send(Err(ProxyError::InternalError(
+                      "client_disconnected".to_string(),
+                    )))
+                    .await;
                   return;
                 }
                 let _ = cache_tx.send(Ok(b)).await;
@@ -182,7 +192,10 @@ impl ProxyService {
                 return;
               }
               None => {
-                let entry = CacheEntry { bytes: buf, content_type: content_type_bg.clone() };
+                let entry = CacheEntry {
+                  bytes: buf,
+                  content_type: content_type_bg.clone(),
+                };
                 let final_key = CacheManager::final_key(&canonical_bg, &content_type_bg);
                 cache.set(&final_key, entry.clone()).await;
                 guard.complete(Ok(entry));
@@ -192,12 +205,11 @@ impl ProxyService {
           }
         });
 
-        let stream = futures::stream::unfold(
-          (client_rx, permit),
-          |(mut rx, permit)| async move {
-            rx.recv().await.map(|b| (Ok::<Bytes, ProxyError>(b), (rx, permit)))
-          },
-        );
+        let stream = futures::stream::unfold((client_rx, permit), |(mut rx, permit)| async move {
+          rx.recv()
+            .await
+            .map(|b| (Ok::<Bytes, ProxyError>(b), (rx, permit)))
+        });
 
         return Ok(ProcessResult::Stream {
           body: Box::pin(stream),
@@ -227,13 +239,29 @@ impl ProxyService {
       .unwrap_or_else(|| crate::modules::proxy::sources::video::is_video_magic(&src_bytes));
 
     if is_video {
-      match crate::modules::proxy::sources::video::extract_frame(
-        &src_bytes,
-        params.t.unwrap_or(0.0),
-        &self.ffmpeg_path,
-      )
-      .await
-      {
+      use crate::modules::proxy::params::SeekMode;
+      use crate::modules::proxy::sources::video::{extract_frame, probe_duration};
+
+      let t_secs = match &params.seek {
+        None => 0.0,
+        Some(SeekMode::Absolute(s)) => *s,
+        Some(SeekMode::Relative(r)) => match probe_duration(&src_bytes, &self.ffprobe_path).await {
+          Ok(dur) => dur * r,
+          Err(_) => {
+            tracing::warn!("ffprobe failed for relative seek, falling back to t=0.0");
+            0.0
+          }
+        },
+        Some(SeekMode::Auto) => match probe_duration(&src_bytes, &self.ffprobe_path).await {
+          Ok(dur) => dur * 0.5,
+          Err(_) => {
+            tracing::warn!("ffprobe failed for auto seek, falling back to t=0.0");
+            0.0
+          }
+        },
+      };
+
+      match extract_frame(&src_bytes, t_secs, &self.ffmpeg_path).await {
         Ok(frame) => match crate::modules::proxy::sources::video::frame_to_png_bytes(frame) {
           Ok(png_bytes) => {
             src_bytes = png_bytes;
@@ -323,6 +351,7 @@ mod tests {
       local_enabled: false,
       local_base_dir: None,
       ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
       cors_allow_origin: vec!["*".to_string()],
       cors_max_age_secs: 600,
       max_concurrent_requests: 256,
@@ -352,14 +381,17 @@ mod tests {
       fetcher,
       http_fetcher: Arc::new(
         crate::modules::proxy::sources::http::HttpFetcher::new(
-          10, 1_000_000,
-          Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![]))
-        ).with_private_ip_check(false)
+          10,
+          1_000_000,
+          Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![])),
+        )
+        .with_private_ip_check(false),
       ),
       cache,
       allowlist: Allowlist::new(allowed_hosts),
       hmac_key: None,
       ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
     }
   }
@@ -373,7 +405,9 @@ mod tests {
       .process(
         params,
         "s3:/some/key.jpg".to_string(),
-        Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().unwrap(),
+        Arc::new(tokio::sync::Semaphore::new(1))
+          .try_acquire_owned()
+          .unwrap(),
       )
       .await;
     // Should NOT be HostNotAllowed - it should reach the fetcher and return the mock error.
@@ -398,7 +432,9 @@ mod tests {
       .process(
         params,
         "s3:/images/photo.jpg".to_string(),
-        Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().unwrap(),
+        Arc::new(tokio::sync::Semaphore::new(1))
+          .try_acquire_owned()
+          .unwrap(),
       )
       .await;
     assert!(
@@ -428,14 +464,17 @@ mod tests {
       fetcher,
       http_fetcher: Arc::new(
         crate::modules::proxy::sources::http::HttpFetcher::new(
-          10, 1_000_000,
-          Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![]))
-        ).with_private_ip_check(false)
+          10,
+          1_000_000,
+          Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![])),
+        )
+        .with_private_ip_check(false),
       ),
       cache,
       allowlist: Allowlist::new(vec![]),
       hmac_key: None,
       ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
     };
 
@@ -444,7 +483,9 @@ mod tests {
       .process(
         params,
         "s3:/v.mp4".to_string(),
-        Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().unwrap(),
+        Arc::new(tokio::sync::Semaphore::new(1))
+          .try_acquire_owned()
+          .unwrap(),
       )
       .await;
     assert!(
@@ -490,6 +531,7 @@ mod streaming_tests {
       local_enabled: false,
       local_base_dir: None,
       ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
       cors_allow_origin: vec!["*".to_string()],
       cors_max_age_secs: 600,
       max_concurrent_requests: 256,
@@ -506,6 +548,7 @@ mod streaming_tests {
       allowlist: Allowlist::new(vec![]),
       hmac_key: None,
       ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: max_bytes,
     };
     (svc, cache)
@@ -663,7 +706,10 @@ mod streaming_tests {
     let canonical = TransformParams::default().canonical_string(&url);
     let final_key = CacheManager::final_key(&canonical, "image/png");
     let (entry, _) = cache.get(&final_key).await;
-    assert!(entry.is_some(), "cache entry should exist after clean stream");
+    assert!(
+      entry.is_some(),
+      "cache entry should exist after clean stream"
+    );
   }
 
   #[tokio::test]
@@ -691,6 +737,9 @@ mod streaming_tests {
     let canonical = TransformParams::default().canonical_string(&url);
     let final_key = CacheManager::final_key(&canonical, "image/png");
     let (entry, _) = cache.get(&final_key).await;
-    assert!(entry.is_none(), "cache must not be written when size limit exceeded");
+    assert!(
+      entry.is_none(),
+      "cache must not be written when size limit exceeded"
+    );
   }
 }

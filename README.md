@@ -4,8 +4,8 @@
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-stable-orange.svg?logo=rust" alt="Rust"></a>
   <a href="https://github.com/tokio-rs/axum"><img src="https://img.shields.io/badge/axum-0.8-blue.svg" alt="Axum"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
-  <a href="https://github.com/vigrise/previewproxy/stargazers"><img src="https://img.shields.io/github/stars/vigrise/previewproxy?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/vigrise/previewproxy/issues"><img src="https://img.shields.io/github/issues/vigrise/previewproxy" alt="GitHub issues"></a>
+  <a href="https://github.com/ViGrise/previewproxy/stargazers"><img src="https://img.shields.io/github/stars/ViGrise/previewproxy?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/ViGrise/previewproxy/issues"><img src="https://img.shields.io/github/issues/ViGrise/previewproxy" alt="GitHub issues"></a>
 </p>
 
 A fast, self-hosted image proxy written in Rust. Fetch images from HTTP URLs, S3 buckets, or local storage - transform them on-the-fly and serve them with multi-tier caching.
@@ -57,10 +57,10 @@ Query params take precedence when both styles are combined.
 | `grayscale` | `true`                       | Convert to grayscale                 |
 | `bright`    | -100 to 100                  | Brightness adjustment                |
 | `contrast`  | -100 to 100                  | Contrast adjustment                  |
-| `blur`      | float (sigma)                | Gaussian blur                        |
-| `wm`        | URL                          | Watermark image URL                  |
-| `t`         | float (seconds, default: 0)  | Video seek time for frame extraction |
-| `sig`       | string                       | HMAC-SHA256 signature (if required)  |
+| `blur`      | float (sigma)                        | Gaussian blur                                    |
+| `wm`        | URL                                  | Watermark image URL                              |
+| `seek`      | `5.0`, `0.5r`, `auto` (default: `0`) | Video seek: absolute seconds, relative ratio, or auto (middle frame) |
+| `sig`       | string                               | HMAC-SHA256 signature (if required)              |
 
 ## API Endpoints
 
@@ -75,9 +75,9 @@ Query params take precedence when both styles are combined.
 ### Linux / macOS
 
 ```shell
-curl -o- https://raw.githubusercontent.com/vigrise/previewproxy/main/install.sh | bash
+curl -o- https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.sh | sudo bash
 # or
-wget -qO- https://raw.githubusercontent.com/vigrise/previewproxy/main/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.sh | sudo bash
 ```
 
 Installs to `/usr/local/bin`. Override with env vars:
@@ -90,7 +90,7 @@ Installs to `/usr/local/bin`. Override with env vars:
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/vigrise/previewproxy/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.ps1 | iex
 ```
 
 Installs to `%LOCALAPPDATA%\previewproxy\bin` and adds it to your user `PATH`. Override with flags:
@@ -106,14 +106,14 @@ Installs to `%LOCALAPPDATA%\previewproxy\bin` and adds it to your user `PATH`. O
 docker run -d -p 8080:8080 \
   -e ALLOWED_HOSTS=img.example.com \
   -e HMAC_KEY=mysecret \
-  ghcr.io/vigrise/previewproxy:latest
+  ghcr.io/ViGrise/previewproxy:latest
 ```
 
 Or with Docker Compose:
 
 ```shell
-curl -O https://raw.githubusercontent.com/vigrise/previewproxy/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/vigrise/previewproxy/main/.env.sample
+curl -O https://raw.githubusercontent.com/ViGrise/previewproxy/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/ViGrise/previewproxy/main/.env.sample
 cp .env.sample .env
 # Edit .env as needed
 docker-compose up -d
@@ -138,6 +138,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags - CL
 | `--cache-disk-max-mb`           | `CACHE_DISK_MAX_MB`           | -                   | L2 disk cache size limit (MB); empty = unlimited                                                                  |
 | `--cache-cleanup-interval-secs` | `CACHE_CLEANUP_INTERVAL_SECS` | `600`               | Background cleanup interval (seconds)                                                                             |
 | `--ffmpeg-path`                 | `FFMPEG_PATH`                 | `ffmpeg`            | Path to the ffmpeg binary                                                                                         |
+| `--ffprobe-path`                | `FFPROBE_PATH`                | (same dir as ffmpeg) | Path to the ffprobe binary; defaults to `ffprobe` in the same directory as ffmpeg                                |
 | `--cors-allow-origin`           | `CORS_ALLOW_ORIGIN`           | `*`                 | Comma-separated allowed CORS origins; `*` = allow all; wildcards (`*.example.com`) match a single subdomain label |
 | `--cors-max-age-secs`           | `CORS_MAX_AGE_SECS`           | `600`               | CORS preflight cache duration (seconds)                                                                           |
 | -                               | `RUST_LOG`                    | `server=info,...`   | Log level filter                                                                                                  |
@@ -186,7 +187,7 @@ Private, loopback, link-local, and reserved IP ranges (RFC 1918, RFC 6598, IPv6 
 
 **Runtime**
 
-- `ffmpeg` - video frame extraction (`apt install ffmpeg` / `brew install ffmpeg`)
+- `ffmpeg` + `ffprobe` - video frame extraction and duration probing (`apt install ffmpeg` / `brew install ffmpeg`)
 
 **Build-time native libs**
 
@@ -224,7 +225,7 @@ cargo clippy
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or pull request at [github.com/vigrise/previewproxy](https://github.com/vigrise/previewproxy).
+Contributions are welcome. Please open an issue or pull request at [github.com/ViGrise/previewproxy](https://github.com/ViGrise/previewproxy).
 
 ## License
 

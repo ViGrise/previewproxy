@@ -39,6 +39,7 @@ pub struct Configuration {
   pub local_base_dir: Option<String>,
   // Video
   pub ffmpeg_path: String,
+  pub ffprobe_path: String,
   // CORS
   pub cors_allow_origin: Vec<String>,
   pub cors_max_age_secs: u64,
@@ -129,6 +130,21 @@ impl Configuration {
       local_enabled: env_var_bool("LOCAL_ENABLED"),
       local_base_dir: env_var_opt("LOCAL_BASE_DIR"),
       ffmpeg_path: std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string()),
+      ffprobe_path: {
+        let explicit = std::env::var("FFPROBE_PATH").unwrap_or_default();
+        if !explicit.is_empty() {
+          explicit
+        } else {
+          let ffmpeg = std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
+          let path = std::path::Path::new(&ffmpeg);
+          match path.parent() {
+            Some(dir) if dir != std::path::Path::new("") => {
+              dir.join("ffprobe").to_string_lossy().to_string()
+            }
+            _ => "ffprobe".to_string(),
+          }
+        }
+      },
       cors_allow_origin: std::env::var("CORS_ALLOW_ORIGIN")
         .unwrap_or_else(|_| "*".to_string())
         .split(',')
@@ -205,6 +221,7 @@ impl std::fmt::Debug for Configuration {
       .field("local_enabled", &self.local_enabled)
       .field("local_base_dir", &self.local_base_dir)
       .field("ffmpeg_path", &self.ffmpeg_path)
+      .field("ffprobe_path", &self.ffprobe_path)
       .field("cors_allow_origin", &self.cors_allow_origin)
       .field("cors_max_age_secs", &self.cors_max_age_secs)
       .field("max_concurrent_requests", &self.max_concurrent_requests)

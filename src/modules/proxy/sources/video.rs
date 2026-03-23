@@ -88,6 +88,54 @@ pub async fn extract_frame(
   Ok(img)
 }
 
+/// Probe video duration in seconds using the ffprobe CLI.
+///
+/// Runs: `ffprobe -v error -show_entries format=duration -of csv=p=0 <tmpfile>`
+/// Returns `ProxyError::VideoDecodeError` if ffprobe fails or output cannot be parsed.
+pub async fn probe_duration(bytes: &[u8], ffprobe_bin: &str) -> Result<f32, ProxyError> {
+  let tmp = tempfile::NamedTempFile::new().map_err(|e| ProxyError::InternalError(e.to_string()))?;
+  std::fs::write(tmp.path(), bytes).map_err(|e| ProxyError::InternalError(e.to_string()))?;
+
+  let output = tokio::process::Command::new(ffprobe_bin)
+    .args([
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "csv=p=0",
+      tmp.path().to_str().unwrap_or(""),
+    ])
+    .output()
+    .await
+    .map_err(|e| {
+      if e.kind() == std::io::ErrorKind::NotFound {
+        tracing::warn!("ffprobe binary not found at {ffprobe_bin:?}: {e}");
+      } else {
+        tracing::warn!("ffprobe spawn error: {e}");
+      }
+      ProxyError::VideoDecodeError
+    })?;
+
+  drop(tmp);
+
+  if !output.status.success() || output.stdout.is_empty() {
+    let snippet = String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(512)]);
+    tracing::warn!(
+      "ffprobe failed (status={:?}): {}",
+      output.status.code(),
+      snippet
+    );
+    return Err(ProxyError::VideoDecodeError);
+  }
+
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  stdout.trim().parse::<f32>().map_err(|_| {
+    tracing::warn!("ffprobe returned unparseable duration: {stdout:?}");
+    ProxyError::VideoDecodeError
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -165,5 +213,34 @@ mod tests {
     let bytes = std::fs::read("tests/fixtures/minimal.mp4").unwrap();
     let img = extract_frame(&bytes, 0.0, "ffmpeg").await.unwrap();
     assert!(img.width() > 0 && img.height() > 0);
+  }
+
+  #[tokio::test]
+  async fn test_probe_duration_ffprobe_not_found() {
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    unsafe { std::env::set_var("PATH", "") };
+    let result = probe_duration(&[], "ffprobe").await;
+    unsafe { std::env::set_var("PATH", original_path) };
+    assert!(matches!(
+      result,
+      Err(crate::common::errors::ProxyError::VideoDecodeError)
+    ));
+  }
+
+  #[tokio::test]
+  async fn test_probe_duration_invalid_input() {
+    let result = probe_duration(b"not a video", "ffprobe").await;
+    assert!(matches!(
+      result,
+      Err(crate::common::errors::ProxyError::VideoDecodeError)
+    ));
+  }
+
+  #[tokio::test]
+  #[ignore = "requires ffprobe binary in PATH and tests/fixtures/minimal.mp4"]
+  async fn test_probe_duration_real_video() {
+    let bytes = std::fs::read("tests/fixtures/minimal.mp4").unwrap();
+    let dur = probe_duration(&bytes, "ffprobe").await.unwrap();
+    assert!(dur > 0.0);
   }
 }
