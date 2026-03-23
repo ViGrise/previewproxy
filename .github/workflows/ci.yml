@@ -46,7 +46,7 @@ jobs:
             ext: ""
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            artifact: previewproxy-linux-aarch64
+            artifact: previewproxy-linux-arm64
             ext: ""
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -54,7 +54,7 @@ jobs:
             ext: ""
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: previewproxy-darwin-aarch64
+            artifact: previewproxy-darwin-arm64
             ext: ""
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -66,7 +66,7 @@ jobs:
           # assembly build fails regardless of host. Re-enable when rav1e supports this target.
           # - os: windows-11-arm
           #   target: aarch64-pc-windows-msvc
-          #   artifact: previewproxy-windows-aarch64
+          #   artifact: previewproxy-windows-arm64
           #   ext: .exe
 
     steps:
@@ -231,6 +231,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          pattern: previewproxy-*
           merge-multiple: true
 
       - name: Create GitHub Release
