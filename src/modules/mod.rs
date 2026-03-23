@@ -9,12 +9,15 @@ use crate::modules::cache::manager::CacheManager;
 use crate::modules::proxy::fetchable::Fetchable;
 use axum::Router;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 pub struct AppState {
   pub cfg: Config,
   pub cache: Arc<CacheManager>,
   pub fetcher: Arc<dyn Fetchable>,
+  pub http_fetcher: Arc<crate::modules::proxy::sources::http::HttpFetcher>,
+  pub concurrency: Arc<Semaphore>,
 }
 
 pub fn router(state: AppState) -> Router {
