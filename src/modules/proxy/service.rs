@@ -43,6 +43,9 @@ pub struct ProxyService {
   ffmpeg_path: String,
   ffprobe_path: String,
   max_source_bytes: u64,
+  input_disallow: std::collections::HashSet<crate::common::config::DisallowedInput>,
+  output_disallow: std::collections::HashSet<crate::common::config::DisallowedOutput>,
+  transform_disallow: std::collections::HashSet<crate::common::config::DisallowedTransform>,
 }
 
 impl ProxyService {
@@ -57,6 +60,9 @@ impl ProxyService {
       ffmpeg_path: state.cfg.ffmpeg_path.clone(),
       ffprobe_path: state.cfg.ffprobe_path.clone(),
       max_source_bytes: state.cfg.max_source_bytes,
+      input_disallow: state.cfg.input_disallow.clone(),
+      output_disallow: state.cfg.output_disallow.clone(),
+      transform_disallow: state.cfg.transform_disallow.clone(),
     }
   }
 
@@ -137,6 +143,11 @@ impl ProxyService {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(';').next().unwrap_or(s).trim().to_string())
         .unwrap_or_default();
+
+      if let Err(e) = self.check_input_disallow(&content_type) {
+        guard.complete(Err(e.clone()));
+        return Err(e);
+      }
 
       if content_type.starts_with("video/") || content_type == "application/pdf" {
         drop(resp);
@@ -238,6 +249,15 @@ impl ProxyService {
       .map(|ct| ct.starts_with("video/"))
       .unwrap_or_else(|| crate::modules::proxy::sources::video::is_video_magic(&src_bytes));
 
+    if is_video
+      && self
+        .input_disallow
+        .contains(&crate::common::config::DisallowedInput::Video)
+    {
+      guard.complete(Err(ProxyError::TransformDisabled("video".to_string())));
+      return Err(ProxyError::TransformDisabled("video".to_string()));
+    }
+
     if is_video {
       use crate::modules::proxy::params::SeekMode;
       use crate::modules::proxy::sources::video::{extract_frame, probe_duration};
@@ -279,18 +299,36 @@ impl ProxyService {
       }
     }
 
+    // Input disallow check on buffered path.
+    // Note: if the fetcher returns no content-type (src_ct is None), this check is skipped.
+    // Magic-byte-only sources (e.g. S3 objects without a content-type header) bypass
+    // INPUT_DISALLOW_LIST. This is a known limitation.
+    if let Some(ref ct) = src_ct {
+      if let Err(e) = self.check_input_disallow(ct) {
+        guard.complete(Err(e.clone()));
+        return Err(e);
+      }
+    }
+
     // 9. Force pipeline for PDF to rasterize first page even without transform flags.
     let is_pdf =
       src_ct.as_deref() == Some("application/pdf") || (!is_video && src_bytes.starts_with(b"%PDF"));
 
     // 10. If has_transforms or is_pdf: run_pipeline(); else resolve_content_type()
     let pipeline_result = if params.has_transforms() || is_pdf {
-      pipeline::run_pipeline(params, src_bytes, src_ct, self.fetcher.clone())
-        .await
-        .map(|(bytes, ct)| CacheEntry {
-          bytes,
-          content_type: ct,
-        })
+      pipeline::run_pipeline(
+        params,
+        src_bytes,
+        src_ct,
+        self.fetcher.clone(),
+        &self.output_disallow,
+        &self.transform_disallow,
+      )
+      .await
+      .map(|(bytes, ct)| CacheEntry {
+        bytes,
+        content_type: ct,
+      })
     } else {
       resolve_content_type(src_ct.as_deref(), &src_bytes).map(|ct| CacheEntry {
         bytes: src_bytes,
@@ -314,6 +352,34 @@ impl ProxyService {
 
     // 11. Return Ok(ProcessResult::Cached(entry, CacheHit::Miss))
     Ok(ProcessResult::Cached(entry, CacheHit::Miss))
+  }
+
+  /// Check if a content-type is in the input disallow list.
+  /// Does NOT handle `video/*` MIME types - video is blocked via `DisallowedInput::Video`
+  /// before the video extraction path, not through this function.
+  /// Returns `Ok(())` for unknown or unrecognized content types.
+  fn check_input_disallow(&self, content_type: &str) -> Result<(), ProxyError> {
+    use crate::common::config::DisallowedInput;
+    let token = match content_type {
+      "image/jpeg" => Some(DisallowedInput::Jpeg),
+      "image/png" => Some(DisallowedInput::Png),
+      "image/gif" => Some(DisallowedInput::Gif),
+      "image/webp" => Some(DisallowedInput::Webp),
+      "image/avif" => Some(DisallowedInput::Avif),
+      "image/jxl" => Some(DisallowedInput::Jxl),
+      "image/bmp" => Some(DisallowedInput::Bmp),
+      "image/tiff" => Some(DisallowedInput::Tiff),
+      "application/pdf" => Some(DisallowedInput::Pdf),
+      "image/vnd.adobe.photoshop" => Some(DisallowedInput::Psd),
+      _ => None,
+    };
+    if let Some(t) = token {
+      if self.input_disallow.contains(&t) {
+        let name = format!("{t:?}").to_lowercase();
+        return Err(ProxyError::TransformDisabled(name));
+      }
+    }
+    Ok(())
   }
 }
 
@@ -354,6 +420,9 @@ mod tests {
       cors_allow_origin: vec!["*".to_string()],
       cors_max_age_secs: 600,
       max_concurrent_requests: 256,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
     })
   }
 
@@ -392,6 +461,9 @@ mod tests {
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
     }
   }
 
@@ -475,6 +547,9 @@ mod tests {
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
     };
 
     let params = TransformParams::default();
@@ -490,6 +565,62 @@ mod tests {
     assert!(
       matches!(result, Err(ProxyError::VideoDecodeError)),
       "expected VideoDecodeError for invalid video content"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_video_disallowed_returns_transform_disabled() {
+    use crate::common::config::DisallowedInput;
+
+    struct VideoMockFetcher2;
+    #[async_trait::async_trait]
+    impl Fetchable for VideoMockFetcher2 {
+      async fn fetch(&self, _url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
+        let mut bytes = vec![0x00, 0x00, 0x00, 0x20];
+        bytes.extend_from_slice(b"ftyp");
+        bytes.extend(vec![0u8; 100]);
+        Ok((bytes, Some("video/mp4".to_string())))
+      }
+    }
+
+    let cfg = make_test_configuration();
+    let fetcher: Arc<dyn Fetchable> = Arc::new(VideoMockFetcher2);
+    let cache = CacheManager::new(&cfg);
+    let mut input_disallow = std::collections::HashSet::new();
+    input_disallow.insert(DisallowedInput::Video);
+    let svc = ProxyService {
+      fetcher,
+      http_fetcher: Arc::new(
+        crate::modules::proxy::sources::http::HttpFetcher::new(
+          10,
+          1_000_000,
+          Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![])),
+        )
+        .with_private_ip_check(false),
+      ),
+      cache,
+      allowlist: Allowlist::new(vec![]),
+      hmac_key: None,
+      ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
+      max_source_bytes: 1_000_000,
+      input_disallow,
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
+    };
+    let params = TransformParams::default();
+    let result = svc
+      .process(
+        params,
+        "s3:/v.mp4".to_string(),
+        Arc::new(tokio::sync::Semaphore::new(1))
+          .try_acquire_owned()
+          .unwrap(),
+      )
+      .await;
+    assert!(
+      matches!(result, Err(ProxyError::TransformDisabled(_))),
+      "expected TransformDisabled for disallowed video input, got: {result:?}"
     );
   }
 }
@@ -534,6 +665,9 @@ mod streaming_tests {
       cors_allow_origin: vec!["*".to_string()],
       cors_max_age_secs: 600,
       max_concurrent_requests: 256,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
     });
     let http = Arc::new(
       HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
@@ -549,6 +683,9 @@ mod streaming_tests {
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: max_bytes,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
     };
     (svc, cache)
   }
@@ -708,6 +845,37 @@ mod streaming_tests {
     assert!(
       entry.is_some(),
       "cache entry should exist after clean stream"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_streaming_input_disallowed_returns_transform_disabled() {
+    use crate::common::config::DisallowedInput;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_bytes(vec![1u8; 50])
+          .insert_header("content-type", "image/png"),
+      )
+      .mount(&server)
+      .await;
+
+    let (mut svc, _cache) = make_svc(1_000_000);
+    svc.input_disallow.insert(DisallowedInput::Png);
+
+    let result = svc
+      .process(
+        TransformParams::default(),
+        format!("{}/img.png", server.uri()),
+        permit(),
+      )
+      .await;
+
+    assert!(
+      matches!(result, Err(ProxyError::TransformDisabled(_))),
+      "expected TransformDisabled for disallowed PNG in streaming path, got: {result:?}"
     );
   }
 
