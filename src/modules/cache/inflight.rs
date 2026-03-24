@@ -62,10 +62,9 @@ impl InflightMap {
     let entry = self.map.get(key)?.clone();
     entry.notify.notified().await;
     let guard = entry.result.lock().await;
-    guard.as_ref().map(|r| {
-      r.clone()
-        .map_err(ProxyError::InternalError)
-    })
+    guard
+      .as_ref()
+      .map(|r| r.clone().map_err(ProxyError::InternalError))
   }
 }
 
