@@ -53,10 +53,9 @@ pub async fn run_pipeline(
   let resolved_ct = resolve_content_type(src_content_type.as_deref(), &src_bytes)?;
   let is_document = resolved_ct == "application/pdf";
 
-  // Output disallow check
-  {
+  // Output disallow / format validation
+  if let Some(fmt) = params.format.as_deref() {
     use crate::common::config::DisallowedOutput;
-    let fmt = params.format.as_deref().unwrap_or("jpeg");
     let token: Option<DisallowedOutput> = match fmt {
       "jpeg" => Some(DisallowedOutput::Jpeg),
       "png"  => Some(DisallowedOutput::Png),
@@ -67,7 +66,7 @@ pub async fn run_pipeline(
       "bmp"  => Some(DisallowedOutput::Bmp),
       "tiff" => Some(DisallowedOutput::Tiff),
       "ico"  => Some(DisallowedOutput::Ico),
-      _ => None,
+      _ => return Err(ProxyError::UnsupportedFormat(fmt.to_string())),
     };
     if let Some(t) = token {
       if output_disallow.contains(&t) {
@@ -442,5 +441,21 @@ mod tests {
       &output_disallow, &std::collections::HashSet::new(),
     ).await;
     assert!(matches!(result2, Err(crate::common::errors::ProxyError::TransformDisabled(_))));
+  }
+
+  #[tokio::test]
+  async fn test_unknown_format_returns_unsupported_format_error() {
+    let params = TransformParams {
+      format: Some("heic".to_string()),
+      ..Default::default()
+    };
+    let result = run_pipeline(
+      params, tiny_png_bytes(), Some("image/png".to_string()), test_fetcher(),
+      &std::collections::HashSet::new(), &std::collections::HashSet::new(),
+    ).await;
+    assert!(
+      matches!(result, Err(crate::common::errors::ProxyError::UnsupportedFormat(_))),
+      "expected UnsupportedFormat for unknown format value, got: {result:?}"
+    );
   }
 }
