@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::{
   path::{Path, PathBuf},
   sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
   },
 };
 use tokio::fs;
@@ -147,18 +147,18 @@ impl DiskCache {
     }
 
     // Enforce max_bytes: evict oldest entries first until under the limit
-    if let Some(max) = self.max_bytes {
-      if total > max {
-        // Sort oldest first
-        live.sort_by_key(|(created_at, _, _, _)| *created_at);
-        for (_, bin, meta, size) in live {
-          if total <= max {
-            break;
-          }
-          let _ = fs::remove_file(&bin).await;
-          let _ = fs::remove_file(&meta).await;
-          total = total.saturating_sub(size);
+    if let Some(max) = self.max_bytes
+      && total > max
+    {
+      // Sort oldest first
+      live.sort_by_key(|(created_at, _, _, _)| *created_at);
+      for (_, bin, meta, size) in live {
+        if total <= max {
+          break;
         }
+        let _ = fs::remove_file(&bin).await;
+        let _ = fs::remove_file(&meta).await;
+        total = total.saturating_sub(size);
       }
     }
 

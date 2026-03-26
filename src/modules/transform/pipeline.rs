@@ -12,10 +12,10 @@ pub fn resolve_content_type(header: Option<&str>, bytes: &[u8]) -> Result<String
     Some("application/pdf") => Ok("application/pdf".to_string()),
     Some(_) => Err(ProxyError::NotAnImage),
     None => {
-      if let Some(kind) = infer::get(bytes) {
-        if kind.mime_type().starts_with("image/") || kind.mime_type() == "application/pdf" {
-          return Ok(kind.mime_type().to_string());
-        }
+      if let Some(kind) = infer::get(bytes)
+        && (kind.mime_type().starts_with("image/") || kind.mime_type() == "application/pdf")
+      {
+        return Ok(kind.mime_type().to_string());
       }
       if bytes.starts_with(b"%PDF") {
         return Ok("application/pdf".to_string());
@@ -77,10 +77,10 @@ pub async fn run_pipeline(
       "ico" => Some(DisallowedOutput::Ico),
       _ => return Err(ProxyError::UnsupportedFormat(fmt.to_string())),
     };
-    if let Some(t) = token {
-      if output_disallow.contains(&t) {
-        return Err(ProxyError::TransformDisabled(fmt.to_string()));
-      }
+    if let Some(t) = token
+      && output_disallow.contains(&t)
+    {
+      return Err(ProxyError::TransformDisabled(fmt.to_string()));
     }
   }
 
@@ -171,7 +171,8 @@ pub async fn run_pipeline(
   }
 
   let resolved_ct_clone = resolved_ct.clone();
-  let result = spawn_blocking(move || -> Result<(Vec<u8>, String), ProxyError> {
+
+  spawn_blocking(move || -> Result<(Vec<u8>, String), ProxyError> {
     let mut img = crate::modules::transform::ops::decode::dispatch(&resolved_ct_clone, &src_bytes)?;
 
     // Resize
@@ -213,9 +214,7 @@ pub async fn run_pipeline(
     ops::encode::encode(img, fmt, quality)
   })
   .await
-  .map_err(|e| ProxyError::InternalError(format!("spawn_blocking panic: {e}")))?;
-
-  result
+  .map_err(|e| ProxyError::InternalError(format!("spawn_blocking panic: {e}")))?
 }
 
 #[cfg(test)]
@@ -327,8 +326,8 @@ mod tests {
   async fn test_gif_anim_all_frames_pipeline() {
     use crate::modules::proxy::dto::params::GifAnimRange;
     use crate::modules::transform::test_helpers::tiny_gif_anim_bytes;
-    use image::codecs::gif::GifDecoder;
     use image::AnimationDecoder;
+    use image::codecs::gif::GifDecoder;
     use std::io::Cursor;
 
     let params = TransformParams {
@@ -359,8 +358,8 @@ mod tests {
     // gif_anim alone with no other transforms must still re-encode (not passthrough)
     use crate::modules::proxy::dto::params::GifAnimRange;
     use crate::modules::transform::test_helpers::tiny_gif_anim_bytes;
-    use image::codecs::gif::GifDecoder;
     use image::AnimationDecoder;
+    use image::codecs::gif::GifDecoder;
     use std::io::Cursor;
 
     let params = TransformParams {
