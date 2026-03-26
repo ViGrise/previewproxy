@@ -91,6 +91,10 @@ pub struct Cli {
   #[arg(long, env = "TRANSFORM_DISALLOW_LIST", default_value = "")]
   pub transform_disallow_list: String,
 
+  /// URL alias definitions: name=https://base.url,name2=https://other.url; enables name:/path scheme in requests [env: URL_ALIASES]
+  #[arg(long, env = "URL_ALIASES", default_value = "")]
+  pub url_aliases: String,
+
   #[command(subcommand)]
   pub command: Option<Commands>,
 }
@@ -123,6 +127,7 @@ impl Cli {
       std::env::set_var("INPUT_DISALLOW_LIST", &self.input_disallow_list);
       std::env::set_var("OUTPUT_DISALLOW_LIST", &self.output_disallow_list);
       std::env::set_var("TRANSFORM_DISALLOW_LIST", &self.transform_disallow_list);
+      std::env::set_var("URL_ALIASES", &self.url_aliases);
     }
   }
 }
