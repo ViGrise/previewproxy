@@ -41,9 +41,7 @@ mod tests {
   use wiremock::matchers::{method, path};
   use wiremock::{Mock, MockServer, ResponseTemplate};
 
-  fn make_alias_source(aliases: Vec<(&str, &str)>, server_uri: Option<&str>) -> AliasSource {
-    // For tests we use a real base URL (wiremock server) or a dummy one for unit tests
-    let _ = server_uri;
+  fn make_alias_source(aliases: Vec<(&str, &str)>) -> AliasSource {
     let http = Arc::new(
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![]))).with_private_ip_check(false),
     );
@@ -53,7 +51,7 @@ mod tests {
 
   #[test]
   fn test_resolve_url_basic() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com")]);
     // Test URL rewriting logic directly
     let resolved = source.resolve("mycdn:/path/img.jpg").unwrap();
     assert_eq!(resolved, "https://img.example.com/path/img.jpg");
@@ -61,35 +59,35 @@ mod tests {
 
   #[test]
   fn test_resolve_url_trailing_slash_on_base() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com/")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com/")]);
     let resolved = source.resolve("mycdn:/path/img.jpg").unwrap();
     assert_eq!(resolved, "https://img.example.com/path/img.jpg");
   }
 
   #[test]
   fn test_resolve_url_leading_slash_on_path() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com")]);
     let resolved = source.resolve("mycdn://path/img.jpg").unwrap();
     assert_eq!(resolved, "https://img.example.com/path/img.jpg");
   }
 
   #[test]
   fn test_resolve_url_no_leading_slash_on_path() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com")]);
     let resolved = source.resolve("mycdn:path/img.jpg").unwrap();
     assert_eq!(resolved, "https://img.example.com/path/img.jpg");
   }
 
   #[test]
   fn test_resolve_url_with_query_string() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com")]);
     let resolved = source.resolve("mycdn:/img.jpg?w=100&h=200").unwrap();
     assert_eq!(resolved, "https://img.example.com/img.jpg?w=100&h=200");
   }
 
   #[test]
   fn test_resolve_unknown_scheme_error() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com")]);
     let err = source.resolve("other:/img.jpg").unwrap_err();
     assert!(
       matches!(&err, ProxyError::InvalidParams(m) if m == "unknown alias scheme: other"),
@@ -99,7 +97,7 @@ mod tests {
 
   #[test]
   fn test_resolve_no_colon_slash_error() {
-    let source = make_alias_source(vec![("mycdn", "https://img.example.com")], None);
+    let source = make_alias_source(vec![("mycdn", "https://img.example.com")]);
     let err = source.resolve("notaurl").unwrap_err();
     assert!(
       matches!(&err, ProxyError::InvalidParams(m) if m == "unrecognized URL format"),
@@ -120,7 +118,7 @@ mod tests {
       .mount(&server)
       .await;
 
-    let source = make_alias_source(vec![("mycdn", &server.uri())], None);
+    let source = make_alias_source(vec![("mycdn", &server.uri())]);
     let (bytes, ct) = source.fetch("mycdn:/path/img.jpg").await.unwrap();
     assert_eq!(bytes, b"imagedata");
     assert_eq!(ct, Some("image/jpeg".to_string()));
