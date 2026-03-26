@@ -83,28 +83,6 @@ Query params take precedence when both styles are combined.
 | `GET`  | `/proxy`  | Query-style image proxy       |
 | `GET`  | `/*path`  | Path-style image proxy        |
 
-## URL Aliases
-
-Map short scheme names to real HTTP base URLs to avoid exposing domains in requests:
-
-```ini
-URL_ALIASES=mycdn=https://img.example.com,cdn2=https://other.com
-```
-
-Then use the alias scheme in path-style or query-style requests:
-
-```bash
-# Path-style with alias
-GET /300x200,webp/mycdn:/photos/dog.jpg
-
-# Query-style with alias
-GET /proxy?url=mycdn:/photos/dog.jpg&w=300
-```
-
-- Aliases bypass `ALLOWED_HOSTS` (operator-controlled, implicitly trusted)
-- SSRF protection (private IP blocking) still applies
-- Base URL must be `http://` or `https://`
-
 ## Getting Started
 
 ### Linux / macOS
@@ -189,7 +167,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags - CL
 | `--input-disallow-list`         | `INPUT_DISALLOW_LIST`         | -                              | Comma-separated input formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `pdf`, `psd`, `video`               |
 | `--output-disallow-list`        | `OUTPUT_DISALLOW_LIST`        | -                              | Comma-separated output formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `ico`                              |
 | `--transform-disallow-list`     | `TRANSFORM_DISALLOW_LIST`     | -                              | Comma-separated transforms to block: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur`, `watermark`, `gif_anim` |
-| -                               | `URL_ALIASES`                 | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests         |
+| `--url-aliases`                 | `URL_ALIASES`                 | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests         |
 | -                               | `RUST_LOG`                    | `server=info,...`              | Log level filter                                                                                                                        |
 
 ---
@@ -262,6 +240,28 @@ Tokens: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur
 ### SSRF Protection
 
 Private, loopback, link-local, and reserved IP ranges (RFC 1918, RFC 6598, IPv6 ULA) are always blocked. On redirects, each hop's resolved IP and host are re-validated before following, preventing bypass via open redirectors.
+
+### URL Aliases
+
+Map short scheme names to real HTTP base URLs to avoid exposing domains in requests:
+
+```ini
+URL_ALIASES=mycdn=https://img.example.com,cdn2=https://other.com
+```
+
+Then use the alias scheme in path-style or query-style requests:
+
+```bash
+# Path-style with alias
+GET /300x200,webp/mycdn:/photos/dog.jpg
+
+# Query-style with alias
+GET /proxy?url=mycdn:/photos/dog.jpg&w=300
+```
+
+- Aliases bypass `ALLOWED_HOSTS` (operator-controlled, implicitly trusted)
+- SSRF protection (private IP blocking) still applies
+- Base URL must be `http://` or `https://`
 
 ## Development
 
