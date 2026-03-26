@@ -22,7 +22,12 @@ impl SourceRouter {
     local: Option<Arc<LocalSource>>,
     alias: Option<Arc<AliasSource>>,
   ) -> Self {
-    Self { http, s3, local, alias }
+    Self {
+      http,
+      s3,
+      local,
+      alias,
+    }
   }
 }
 
@@ -54,7 +59,9 @@ impl Fetchable for SourceRouter {
     if url.contains(":/") {
       return match &self.alias {
         Some(alias) => alias.fetch(url).await,
-        None => Err(ProxyError::InvalidParams("alias source is not enabled".to_string())),
+        None => Err(ProxyError::InvalidParams(
+          "alias source is not enabled".to_string(),
+        )),
       };
     }
     Err(ProxyError::InvalidParams(
@@ -165,17 +172,25 @@ mod tests {
       .await
       .unwrap();
 
-    let router = SourceRouter::new(make_http_fetcher(), None, Some(Arc::new(local_source)), None);
+    let router = SourceRouter::new(
+      make_http_fetcher(),
+      None,
+      Some(Arc::new(local_source)),
+      None,
+    );
 
     let (bytes, _ct) = router.fetch("local:/test.jpg").await.unwrap();
     assert_eq!(bytes, content);
   }
 
-  fn make_alias_source_for_test(server_uri: &str) -> Arc<crate::modules::proxy::sources::AliasSource> {
+  fn make_alias_source_for_test(
+    server_uri: &str,
+  ) -> Arc<crate::modules::proxy::sources::AliasSource> {
     use crate::modules::proxy::sources::AliasSource;
     use crate::modules::security::allowlist::Allowlist;
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![]))).with_private_ip_check(false),
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+        .with_private_ip_check(false),
     );
     let mut map = std::collections::HashMap::new();
     map.insert("mycdn".to_string(), server_uri.to_string());
@@ -207,7 +222,8 @@ mod tests {
     let result = router.fetch("mycdn:/img.jpg").await;
     assert!(
       matches!(result, Err(ProxyError::InvalidParams(ref msg)) if msg == "alias source is not enabled"),
-      "unexpected: {:?}", result
+      "unexpected: {:?}",
+      result
     );
   }
 
@@ -217,7 +233,8 @@ mod tests {
     let result = router.fetch("mycdn://img.jpg").await;
     assert!(
       matches!(result, Err(ProxyError::InvalidParams(ref msg)) if msg == "unsupported scheme"),
-      "unexpected: {:?}", result
+      "unexpected: {:?}",
+      result
     );
   }
 

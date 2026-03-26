@@ -1,7 +1,6 @@
 use crate::common::errors::ProxyError;
 use crate::modules::proxy::fetchable::Fetchable;
 use crate::modules::proxy::sources::HttpFetcher;
-use crate::modules::security::allowlist::Allowlist;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -16,12 +15,13 @@ impl AliasSource {
   }
 
   fn resolve(&self, url: &str) -> Result<String, ProxyError> {
-    let (scheme, raw_path) = url.split_once(':').ok_or_else(|| {
-      ProxyError::InvalidParams("unrecognized URL format".to_string())
-    })?;
-    let base = self.aliases.get(scheme).ok_or_else(|| {
-      ProxyError::InvalidParams(format!("unknown alias scheme: {scheme}"))
-    })?;
+    let (scheme, raw_path) = url
+      .split_once(':')
+      .ok_or_else(|| ProxyError::InvalidParams("unrecognized URL format".to_string()))?;
+    let base = self
+      .aliases
+      .get(scheme)
+      .ok_or_else(|| ProxyError::InvalidParams(format!("unknown alias scheme: {scheme}")))?;
     let path = raw_path.trim_start_matches('/');
     Ok(format!("{}/{}", base.trim_end_matches('/'), path))
   }
@@ -38,14 +38,19 @@ impl Fetchable for AliasSource {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::modules::security::allowlist::Allowlist;
   use wiremock::matchers::{method, path};
   use wiremock::{Mock, MockServer, ResponseTemplate};
 
   fn make_alias_source(aliases: Vec<(&str, &str)>) -> AliasSource {
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![]))).with_private_ip_check(false),
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+        .with_private_ip_check(false),
     );
-    let map = aliases.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let map = aliases
+      .into_iter()
+      .map(|(k, v)| (k.to_string(), v.to_string()))
+      .collect();
     AliasSource::new(map, http)
   }
 
@@ -91,7 +96,8 @@ mod tests {
     let err = source.resolve("other:/img.jpg").unwrap_err();
     assert!(
       matches!(&err, ProxyError::InvalidParams(m) if m == "unknown alias scheme: other"),
-      "unexpected: {:?}", err
+      "unexpected: {:?}",
+      err
     );
   }
 
@@ -101,7 +107,8 @@ mod tests {
     let err = source.resolve("notaurl").unwrap_err();
     assert!(
       matches!(&err, ProxyError::InvalidParams(m) if m == "unrecognized URL format"),
-      "unexpected: {:?}", err
+      "unexpected: {:?}",
+      err
     );
   }
 

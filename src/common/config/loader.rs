@@ -190,7 +190,11 @@ fn parse_url_aliases(s: &str) -> Option<HashMap<String, String>> {
     })
     .collect();
 
-  if map.is_empty() { None } else { Some(map) }
+  if map.is_empty() {
+    None
+  } else {
+    Some(map)
+  }
 }
 
 impl Configuration {
@@ -270,9 +274,7 @@ impl Configuration {
       transform_disallow: parse_transform_disallow(
         &std::env::var("TRANSFORM_DISALLOW_LIST").unwrap_or_default(),
       ),
-      url_aliases: parse_url_aliases(
-        &std::env::var("URL_ALIASES").unwrap_or_default(),
-      ),
+      url_aliases: parse_url_aliases(&std::env::var("URL_ALIASES").unwrap_or_default()),
     });
     if cfg.hmac_key.is_none() {
       tracing::warn!("HMAC_KEY is not set - all requests are unauthenticated");
@@ -372,11 +374,14 @@ impl std::fmt::Debug for Configuration {
         v.sort();
         v
       })
-      .field("url_aliases", &self.url_aliases.as_ref().map(|m| {
-        let mut keys: Vec<_> = m.keys().cloned().collect();
-        keys.sort();
-        keys
-      }))
+      .field(
+        "url_aliases",
+        &self.url_aliases.as_ref().map(|m| {
+          let mut keys: Vec<_> = m.keys().cloned().collect();
+          keys.sort();
+          keys
+        }),
+      )
       .finish()
   }
 }
@@ -515,12 +520,21 @@ mod tests {
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
-    std::env::set_var("URL_ALIASES", "mycdn=https://img.example.com,cdn2=https://other.com");
+    std::env::set_var(
+      "URL_ALIASES",
+      "mycdn=https://img.example.com,cdn2=https://other.com",
+    );
     let cfg = super::Configuration::new();
     std::env::remove_var("URL_ALIASES");
     let map = cfg.url_aliases.clone().unwrap();
-    assert_eq!(map.get("mycdn").map(|s| s.as_str()), Some("https://img.example.com"));
-    assert_eq!(map.get("cdn2").map(|s| s.as_str()), Some("https://other.com"));
+    assert_eq!(
+      map.get("mycdn").map(|s| s.as_str()),
+      Some("https://img.example.com")
+    );
+    assert_eq!(
+      map.get("cdn2").map(|s| s.as_str()),
+      Some("https://other.com")
+    );
   }
 
   #[test]
@@ -528,7 +542,10 @@ mod tests {
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
-    std::env::set_var("URL_ALIASES", "=https://img.example.com,valid=https://ok.com");
+    std::env::set_var(
+      "URL_ALIASES",
+      "=https://img.example.com,valid=https://ok.com",
+    );
     let cfg = super::Configuration::new();
     std::env::remove_var("URL_ALIASES");
     let map = cfg.url_aliases.clone().unwrap();
@@ -541,7 +558,10 @@ mod tests {
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("PORT", "8080");
     std::env::set_var("APP_ENV", "development");
-    std::env::set_var("URL_ALIASES", "bad=file:///etc/passwd,ok=https://img.example.com");
+    std::env::set_var(
+      "URL_ALIASES",
+      "bad=file:///etc/passwd,ok=https://img.example.com",
+    );
     let cfg = super::Configuration::new();
     std::env::remove_var("URL_ALIASES");
     let map = cfg.url_aliases.clone().unwrap();

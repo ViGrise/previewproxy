@@ -189,7 +189,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags - CL
 | `--input-disallow-list`         | `INPUT_DISALLOW_LIST`         | -                              | Comma-separated input formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `pdf`, `psd`, `video`               |
 | `--output-disallow-list`        | `OUTPUT_DISALLOW_LIST`        | -                              | Comma-separated output formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `ico`                              |
 | `--transform-disallow-list`     | `TRANSFORM_DISALLOW_LIST`     | -                              | Comma-separated transforms to block: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur`, `watermark`, `gif_anim` |
-| -                               | `URL_ALIASES`                 | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests        |
+| -                               | `URL_ALIASES`                 | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests         |
 | -                               | `RUST_LOG`                    | `server=info,...`              | Log level filter                                                                                                                        |
 
 ---
