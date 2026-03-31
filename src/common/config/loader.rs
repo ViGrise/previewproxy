@@ -1,5 +1,5 @@
 use crate::common::config::types::{
-  DisallowedInput, DisallowedOutput, DisallowedTransform, Environment,
+  BestFormatConfig, DisallowedInput, DisallowedOutput, DisallowedTransform, Environment,
 };
 use std::{
   collections::{HashMap, HashSet},
@@ -52,6 +52,8 @@ pub struct Configuration {
   pub transform_disallow: HashSet<DisallowedTransform>,
   // URL aliases
   pub url_aliases: Option<HashMap<String, String>>,
+  // Best format
+  pub best_format: BestFormatConfig,
 }
 
 fn env_var(name: &str) -> String {
@@ -271,6 +273,16 @@ impl Configuration {
         &std::env::var("TRANSFORM_DISALLOW_LIST").unwrap_or_default(),
       ),
       url_aliases: parse_url_aliases(&std::env::var("URL_ALIASES").unwrap_or_default()),
+      best_format: BestFormatConfig {
+        complexity_threshold: std::env::var("BEST_FORMAT_COMPLEXITY_THRESHOLD")
+          .ok()
+          .and_then(|v| v.parse().ok())
+          .unwrap_or(5.5),
+        max_resolution: env_var_opt("BEST_FORMAT_MAX_RESOLUTION")
+          .and_then(|v| v.parse().ok()),
+        by_default: env_var_bool("BEST_FORMAT_BY_DEFAULT"),
+        allow_skips: env_var_bool("BEST_FORMAT_ALLOW_SKIPS"),
+      },
     });
     if cfg.hmac_key.is_none() {
       tracing::warn!("HMAC_KEY is not set - all requests are unauthenticated");
@@ -378,6 +390,7 @@ impl std::fmt::Debug for Configuration {
           keys
         }),
       )
+      .field("best_format", &self.best_format)
       .finish()
   }
 }
@@ -604,6 +617,48 @@ mod tests {
     let cfg = super::Configuration::new();
     unsafe { std::env::remove_var("URL_ALIASES") };
     assert!(cfg.url_aliases.is_none());
+  }
+
+  #[test]
+  fn test_best_format_defaults() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PORT", "8080");
+      std::env::set_var("APP_ENV", "development");
+      std::env::remove_var("BEST_FORMAT_COMPLEXITY_THRESHOLD");
+      std::env::remove_var("BEST_FORMAT_MAX_RESOLUTION");
+      std::env::remove_var("BEST_FORMAT_BY_DEFAULT");
+      std::env::remove_var("BEST_FORMAT_ALLOW_SKIPS");
+    }
+    let cfg = super::Configuration::new();
+    assert!((cfg.best_format.complexity_threshold - 5.5).abs() < f64::EPSILON);
+    assert!(cfg.best_format.max_resolution.is_none());
+    assert!(!cfg.best_format.by_default);
+    assert!(!cfg.best_format.allow_skips);
+  }
+
+  #[test]
+  fn test_best_format_from_env() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PORT", "8080");
+      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("BEST_FORMAT_COMPLEXITY_THRESHOLD", "8.0");
+      std::env::set_var("BEST_FORMAT_MAX_RESOLUTION", "4.0");
+      std::env::set_var("BEST_FORMAT_BY_DEFAULT", "true");
+      std::env::set_var("BEST_FORMAT_ALLOW_SKIPS", "1");
+    }
+    let cfg = super::Configuration::new();
+    unsafe {
+      std::env::remove_var("BEST_FORMAT_COMPLEXITY_THRESHOLD");
+      std::env::remove_var("BEST_FORMAT_MAX_RESOLUTION");
+      std::env::remove_var("BEST_FORMAT_BY_DEFAULT");
+      std::env::remove_var("BEST_FORMAT_ALLOW_SKIPS");
+    }
+    assert!((cfg.best_format.complexity_threshold - 8.0).abs() < f64::EPSILON);
+    assert_eq!(cfg.best_format.max_resolution, Some(4.0));
+    assert!(cfg.best_format.by_default);
+    assert!(cfg.best_format.allow_skips);
   }
 
   #[test]

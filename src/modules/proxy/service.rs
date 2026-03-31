@@ -419,6 +419,7 @@ mod tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
+      best_format: Default::default(),
     })
   }
 
@@ -665,6 +666,7 @@ mod streaming_tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
+      best_format: Default::default(),
     });
     let http = Arc::new(
       HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
