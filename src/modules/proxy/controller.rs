@@ -178,6 +178,7 @@ mod concurrency_tests {
       listen_address: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8080)),
       app_port: 8080,
       hmac_key: None,
+      source_url_encryption_key: None,
       allowed_hosts: vec![],
       fetch_timeout_secs: 10,
       max_source_bytes: 1_000_000,
