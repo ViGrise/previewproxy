@@ -204,6 +204,7 @@ mod concurrency_tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
+      best_format: Default::default(),
     });
     let http = Arc::new(
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))

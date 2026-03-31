@@ -55,3 +55,29 @@ impl std::str::FromStr for Environment {
     }
   }
 }
+
+#[derive(Debug, Clone)]
+pub struct BestFormatConfig {
+  pub complexity_threshold: f64,
+  pub max_resolution: Option<f64>,
+  pub by_default: bool,
+  pub allow_skips: bool,
+  pub preferred_formats: Vec<String>,
+}
+
+pub const BEST_FORMAT_DEFAULT_PREFERRED: &[&str] = &["jpeg", "webp", "png"];
+
+impl Default for BestFormatConfig {
+  fn default() -> Self {
+    Self {
+      complexity_threshold: 5.5,
+      max_resolution: None,
+      by_default: false,
+      allow_skips: false,
+      preferred_formats: BEST_FORMAT_DEFAULT_PREFERRED
+        .iter()
+        .map(|s| s.to_string())
+        .collect(),
+    }
+  }
+}
