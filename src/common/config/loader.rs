@@ -1,5 +1,6 @@
 use crate::common::config::types::{
-  BestFormatConfig, DisallowedInput, DisallowedOutput, DisallowedTransform, Environment,
+  BEST_FORMAT_DEFAULT_PREFERRED, BestFormatConfig, DisallowedInput, DisallowedOutput,
+  DisallowedTransform, Environment,
 };
 use std::{
   collections::{HashMap, HashSet},
@@ -195,6 +196,34 @@ fn parse_url_aliases(s: &str) -> Option<HashMap<String, String>> {
   if map.is_empty() { None } else { Some(map) }
 }
 
+const VALID_PREFERRED_FORMATS: &[&str] = &[
+  "jpeg", "png", "webp", "avif", "gif", "bmp", "tiff", "ico", "jxl",
+];
+
+fn parse_preferred_formats(s: &str) -> Vec<String> {
+  if s.trim().is_empty() {
+    return BEST_FORMAT_DEFAULT_PREFERRED
+      .iter()
+      .map(|s| s.to_string())
+      .collect();
+  }
+  s.split(',')
+    .map(|t| t.trim().to_lowercase())
+    .filter(|t| !t.is_empty())
+    .filter(|t| {
+      if VALID_PREFERRED_FORMATS.contains(&t.as_str()) {
+        true
+      } else {
+        tracing::warn!(
+          "BEST_FORMAT_PREFERRED_FORMATS: unknown format {:?}, ignoring",
+          t
+        );
+        false
+      }
+    })
+    .collect()
+}
+
 impl Configuration {
   pub fn new() -> Config {
     let env = env_var("APP_ENV")
@@ -278,10 +307,12 @@ impl Configuration {
           .ok()
           .and_then(|v| v.parse().ok())
           .unwrap_or(5.5),
-        max_resolution: env_var_opt("BEST_FORMAT_MAX_RESOLUTION")
-          .and_then(|v| v.parse().ok()),
+        max_resolution: env_var_opt("BEST_FORMAT_MAX_RESOLUTION").and_then(|v| v.parse().ok()),
         by_default: env_var_bool("BEST_FORMAT_BY_DEFAULT"),
         allow_skips: env_var_bool("BEST_FORMAT_ALLOW_SKIPS"),
+        preferred_formats: parse_preferred_formats(
+          &std::env::var("BEST_FORMAT_PREFERRED_FORMATS").unwrap_or_default(),
+        ),
       },
     });
     if cfg.hmac_key.is_none() {

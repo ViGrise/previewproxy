@@ -1,3 +1,4 @@
+pub mod best_format;
 pub mod blur;
 pub mod color;
 pub mod decode;
@@ -6,4 +7,3 @@ pub mod gif_anim;
 pub mod resize;
 pub mod rotate;
 pub mod watermark;
-pub mod best_format;

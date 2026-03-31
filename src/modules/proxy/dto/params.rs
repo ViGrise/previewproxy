@@ -460,7 +460,7 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
             }
           },
           "format" => match val {
-            "jpeg" | "png" | "webp" | "avif" | "gif" | "bmp" | "tiff" | "ico" | "jxl" => {
+            "jpeg" | "png" | "webp" | "avif" | "gif" | "bmp" | "tiff" | "ico" | "jxl" | "best" => {
               p.format = Some(val.to_string())
             }
             _ => {
@@ -559,7 +559,7 @@ pub fn from_query(
   }
   if let Some(format) = query.get("format") {
     match format.as_str() {
-      "jpeg" | "png" | "webp" | "avif" | "gif" | "bmp" | "tiff" | "ico" | "jxl" => {
+      "jpeg" | "png" | "webp" | "avif" | "gif" | "bmp" | "tiff" | "ico" | "jxl" | "best" => {
         p.format = Some(format.clone())
       }
       _ => {

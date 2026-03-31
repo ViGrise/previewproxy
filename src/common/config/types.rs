@@ -62,7 +62,10 @@ pub struct BestFormatConfig {
   pub max_resolution: Option<f64>,
   pub by_default: bool,
   pub allow_skips: bool,
+  pub preferred_formats: Vec<String>,
 }
+
+pub const BEST_FORMAT_DEFAULT_PREFERRED: &[&str] = &["jpeg", "webp", "png"];
 
 impl Default for BestFormatConfig {
   fn default() -> Self {
@@ -71,6 +74,10 @@ impl Default for BestFormatConfig {
       max_resolution: None,
       by_default: false,
       allow_skips: false,
+      preferred_formats: BEST_FORMAT_DEFAULT_PREFERRED
+        .iter()
+        .map(|s| s.to_string())
+        .collect(),
     }
   }
 }

@@ -225,7 +225,13 @@ pub async fn run_pipeline(
     // Encode
     let quality = params_clone.q.unwrap_or(85);
     let result = if effective_fmt_clone == "best" {
-      ops::best_format::select_best_format(&img, quality, &best_format_cfg_clone, &output_disallow_clone)
+      ops::best_format::select_best_format(
+        &img,
+        quality,
+        &best_format_cfg_clone,
+        &output_disallow_clone,
+        &resolved_ct_clone,
+      )
     } else {
       ops::encode::encode(img, effective_fmt_clone.as_str(), quality)
     }?;
