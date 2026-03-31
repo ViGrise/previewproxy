@@ -6,3 +6,4 @@ pub mod gif_anim;
 pub mod resize;
 pub mod rotate;
 pub mod watermark;
+pub mod best_format;
