@@ -1,5 +1,6 @@
 use crate::common::config::Config;
 use crate::common::errors::ProxyError;
+use crate::modules::security::encryption;
 use crate::modules::AppState;
 use crate::modules::cache::manager::CacheHit;
 use crate::modules::cache::memory::CacheEntry;
@@ -20,6 +21,13 @@ use axum::{
 use futures::StreamExt;
 use std::collections::HashMap;
 use tokio::sync::OwnedSemaphorePermit;
+
+fn decrypt_url(key: Option<&Vec<u8>>, blob: &str) -> Result<String, ProxyError> {
+  let key = key.ok_or_else(|| {
+    ProxyError::InvalidParams("source URL encryption key not configured".to_string())
+  })?;
+  encryption::decrypt(key, blob).map_err(|e| ProxyError::InvalidParams(e.to_string()))
+}
 
 /// Registers the two proxy entry points:
 /// - `GET /proxy?url=<image_url>&<params>` - query-string style
@@ -91,10 +99,15 @@ async fn handle_query_inner(
   query: HashMap<String, String>,
   permit: OwnedSemaphorePermit,
 ) -> Result<Response, ProxyError> {
-  let url = query
+  let raw_url = query
     .get("url")
     .cloned()
     .ok_or_else(|| ProxyError::InvalidParams("missing `url` query param".to_string()))?;
+  let url = if query.contains_key("enc") {
+    decrypt_url(state.cfg.source_url_encryption_key.as_ref(), &raw_url)?
+  } else {
+    raw_url
+  };
   let params = from_query(&query)?;
   let service = ProxyService::new(&state);
   let result = service.process(params, url, permit).await?;
@@ -107,7 +120,13 @@ async fn handle_path_inner(
   query: HashMap<String, String>,
   permit: OwnedSemaphorePermit,
 ) -> Result<Response, ProxyError> {
-  let (mut params, url) = TransformParams::from_path(&path)?;
+  let (mut params, raw_url) = TransformParams::from_path(&path)?;
+  let url = if raw_url.starts_with("enc/") {
+    let blob = &raw_url["enc/".len()..];
+    decrypt_url(state.cfg.source_url_encryption_key.as_ref(), blob)?
+  } else {
+    raw_url
+  };
   if !query.is_empty() {
     let query_params = from_query(&query)?;
     params.merge_from(query_params);
@@ -218,6 +237,112 @@ mod concurrency_tests {
       concurrency: Arc::new(Semaphore::new(permits)),
       cfg,
     }
+  }
+
+  fn make_state_with_enc_key(permits: usize, enc_key: Option<Vec<u8>>) -> AppState {
+    let base = make_state(permits);
+    let mut cfg = (*base.cfg).clone();
+    cfg.source_url_encryption_key = enc_key;
+    AppState {
+      cfg: std::sync::Arc::new(cfg),
+      ..base
+    }
+  }
+
+  #[tokio::test]
+  async fn test_path_encrypted_url_decrypts_and_proxies() {
+    use http_body_util::BodyExt;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_bytes(vec![1u8; 10])
+          .insert_header("content-type", "image/png"),
+      )
+      .mount(&server)
+      .await;
+
+    let key = b"01234567890123456789012345678901".to_vec(); // 32 bytes
+    let blob = crate::modules::security::encryption::encrypt(&key, &server.uri()).unwrap();
+    let state = make_state_with_enc_key(256, Some(key));
+    let app = crate::modules::router(state);
+
+    let req = axum::http::Request::builder()
+      .uri(format!("/enc/{blob}"))
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let _ = resp.into_body().collect().await.unwrap();
+  }
+
+  #[tokio::test]
+  async fn test_query_encrypted_url_decrypts_and_proxies() {
+    use http_body_util::BodyExt;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_bytes(vec![1u8; 10])
+          .insert_header("content-type", "image/png"),
+      )
+      .mount(&server)
+      .await;
+
+    let key = b"01234567890123456789012345678901".to_vec();
+    let blob = crate::modules::security::encryption::encrypt(&key, &server.uri()).unwrap();
+    let state = make_state_with_enc_key(256, Some(key));
+    let app = crate::modules::router(state);
+
+    let encoded_blob = urlencoding::encode(&blob).to_string();
+    let req = axum::http::Request::builder()
+      .uri(format!("/proxy?url={encoded_blob}&enc=1"))
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let _ = resp.into_body().collect().await.unwrap();
+  }
+
+  #[tokio::test]
+  async fn test_encrypted_url_no_key_returns_400() {
+    let state = make_state_with_enc_key(256, None);
+    let app = crate::modules::router(state);
+    let req = axum::http::Request::builder()
+      .uri("/enc/someblob")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+  }
+
+  #[tokio::test]
+  async fn test_encrypted_url_bad_blob_returns_400() {
+    let key = b"01234567890123456789012345678901".to_vec();
+    let state = make_state_with_enc_key(256, Some(key));
+    let app = crate::modules::router(state);
+    let req = axum::http::Request::builder()
+      .uri("/enc/!!!notvalidbase64!!!")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+  }
+
+  #[tokio::test]
+  async fn test_query_enc_flag_no_key_returns_400() {
+    let state = make_state_with_enc_key(256, None);
+    let app = crate::modules::router(state);
+    let req = axum::http::Request::builder()
+      .uri("/proxy?url=someblob&enc=1")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
   }
 
   #[tokio::test]
