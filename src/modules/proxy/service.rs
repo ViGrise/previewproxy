@@ -125,7 +125,9 @@ impl ProxyService {
 
     // --- Streaming path: HTTP source, no transforms ---
     let is_http = image_url.starts_with("http://") || image_url.starts_with("https://");
-    if is_http && !params.has_transforms() {
+    let needs_best = params.format.as_deref() == Some("best")
+      || (params.format.is_none() && self.best_format.by_default);
+    if is_http && !params.has_transforms() && !needs_best {
       let resp = match self.http_fetcher.fetch_streaming(&image_url).await {
         Ok(r) => r,
         Err(e) => {
@@ -312,8 +314,6 @@ impl ProxyService {
       src_ct.as_deref() == Some("application/pdf") || (!is_video && src_bytes.starts_with(b"%PDF"));
 
     // 10. If has_transforms or is_pdf or best_format: run_pipeline(); else resolve_content_type()
-    let needs_best = params.format.as_deref() == Some("best")
-      || (params.format.is_none() && self.best_format.by_default);
     let pipeline_result = if params.has_transforms() || is_pdf || needs_best {
       pipeline::run_pipeline(
         params,

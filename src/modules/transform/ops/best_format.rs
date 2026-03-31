@@ -57,17 +57,21 @@ pub fn select_best_format(
   let density = edge_density(img);
   let is_complex = density >= cfg.complexity_threshold;
 
-  // Fast path: image too large to trial-encode all formats
+  // Fast path: image too large to trial-encode all formats - pick first allowed format
   if cfg.max_resolution.is_some_and(|max| mpx > max) {
-    let fmt = if is_complex { "webp" } else { "png" };
-    if format_to_disallow_token(fmt).is_some_and(|t| output_disallow.contains(&t)) {
-      let fallback = if is_complex { "png" } else { "webp" };
-      if format_to_disallow_token(fallback).is_some_and(|t| output_disallow.contains(&t)) {
-        return Err(ProxyError::TransformDisabled("best".to_string()));
-      }
-      return encode::encode(img.clone(), fallback, quality);
+    let fast_candidates: Vec<&str> = if is_complex {
+      vec!["webp", "avif", "jxl", "jpeg"]
+    } else {
+      vec!["png", "webp", "avif", "jxl", "jpeg"]
+    };
+    let allowed: Vec<&str> = fast_candidates
+      .into_iter()
+      .filter(|fmt| format_to_disallow_token(fmt).is_none_or(|t| !output_disallow.contains(&t)))
+      .collect();
+    if allowed.is_empty() {
+      return Err(ProxyError::TransformDisabled("best".to_string()));
     }
-    return encode::encode(img.clone(), fmt, quality);
+    return encode::encode(img.clone(), allowed[0], quality);
   }
 
   // Full path: try all candidates, pick smallest
