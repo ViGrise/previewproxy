@@ -1,6 +1,5 @@
 use crate::common::config::Config;
 use crate::common::errors::ProxyError;
-use crate::modules::security::encryption;
 use crate::modules::AppState;
 use crate::modules::cache::manager::CacheHit;
 use crate::modules::cache::memory::CacheEntry;
@@ -11,6 +10,7 @@ use crate::modules::proxy::{
   },
   service::ProxyService,
 };
+use crate::modules::security::encryption;
 use axum::{
   Router,
   extract::{Path, Query, State},

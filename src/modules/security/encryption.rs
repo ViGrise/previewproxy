@@ -84,12 +84,16 @@ pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, EncryptionError> {
 
 pub fn decrypt(key: &[u8], blob: &str) -> Result<String, EncryptionError> {
   validate_key(key)?;
-  let raw = URL_SAFE_NO_PAD.decode(blob).map_err(|_| EncryptionError::Base64)?;
+  let raw = URL_SAFE_NO_PAD
+    .decode(blob)
+    .map_err(|_| EncryptionError::Base64)?;
   if raw.len() < 16 {
     return Err(EncryptionError::BlobTooShort);
   }
   let (iv_bytes, ciphertext) = raw.split_at(16);
-  let iv: [u8; 16] = iv_bytes.try_into().expect("split_at(16) guarantees 16 bytes");
+  let iv: [u8; 16] = iv_bytes
+    .try_into()
+    .expect("split_at(16) guarantees 16 bytes");
   let plaintext_bytes = aes_decrypt(key, &iv, ciphertext)?;
   String::from_utf8(plaintext_bytes).map_err(|_| EncryptionError::InvalidUtf8)
 }
@@ -131,19 +135,31 @@ mod tests {
 
   #[test]
   fn test_invalid_key_length() {
-    assert_eq!(encrypt(b"short", "url").unwrap_err(), EncryptionError::InvalidKeyLength);
-    assert_eq!(decrypt(b"short", "blob").unwrap_err(), EncryptionError::InvalidKeyLength);
+    assert_eq!(
+      encrypt(b"short", "url").unwrap_err(),
+      EncryptionError::InvalidKeyLength
+    );
+    assert_eq!(
+      decrypt(b"short", "blob").unwrap_err(),
+      EncryptionError::InvalidKeyLength
+    );
   }
 
   #[test]
   fn test_blob_too_short() {
     let short = URL_SAFE_NO_PAD.encode([0u8; 15]);
-    assert_eq!(decrypt(KEY_32, &short).unwrap_err(), EncryptionError::BlobTooShort);
+    assert_eq!(
+      decrypt(KEY_32, &short).unwrap_err(),
+      EncryptionError::BlobTooShort
+    );
   }
 
   #[test]
   fn test_bad_base64() {
-    assert_eq!(decrypt(KEY_32, "not valid base64!!!").unwrap_err(), EncryptionError::Base64);
+    assert_eq!(
+      decrypt(KEY_32, "not valid base64!!!").unwrap_err(),
+      EncryptionError::Base64
+    );
   }
 
   #[test]
@@ -151,6 +167,9 @@ mod tests {
     let blob = encrypt(KEY_32, "https://example.com/img.jpg").unwrap();
     let wrong_key = b"99999999999999999999999999999999";
     let err = decrypt(wrong_key, &blob).unwrap_err();
-    assert!(matches!(err, EncryptionError::InvalidPadding | EncryptionError::InvalidUtf8));
+    assert!(matches!(
+      err,
+      EncryptionError::InvalidPadding | EncryptionError::InvalidUtf8
+    ));
   }
 }

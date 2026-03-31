@@ -2,8 +2,7 @@ use crate::modules::security::encryption;
 use anyhow::{Result, anyhow};
 
 pub fn run_encrypt_url(url: &str, key_hex: &str) -> Result<String> {
-  let key = hex::decode(key_hex)
-    .map_err(|e| anyhow!("invalid hex key: {e}"))?;
+  let key = hex::decode(key_hex).map_err(|e| anyhow!("invalid hex key: {e}"))?;
   encryption::encrypt(&key, url).map_err(|e| anyhow!("{e}"))
 }
 
@@ -34,6 +33,11 @@ mod tests {
     // 10 hex chars = 5 bytes, invalid for AES
     let result = run_encrypt_url("https://example.com/img.jpg", "deadbeefdeadbeef1234");
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("invalid_key_length"));
+    assert!(
+      result
+        .unwrap_err()
+        .to_string()
+        .contains("invalid_key_length")
+    );
   }
 }

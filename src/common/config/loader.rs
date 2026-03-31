@@ -372,7 +372,10 @@ impl std::fmt::Debug for Configuration {
       .field("hmac_key", &self.hmac_key.as_ref().map(|_| "[redacted]"))
       .field(
         "source_url_encryption_key",
-        &self.source_url_encryption_key.as_ref().map(|k| format!("[redacted {} bytes]", k.len())),
+        &self
+          .source_url_encryption_key
+          .as_ref()
+          .map(|k| format!("[redacted {} bytes]", k.len())),
       )
       .field("allowed_hosts", &self.allowed_hosts)
       .field("fetch_timeout_secs", &self.fetch_timeout_secs)
@@ -752,7 +755,10 @@ mod tests {
     }
     let cfg = super::Configuration::new();
     unsafe { std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY") };
-    assert_eq!(cfg.source_url_encryption_key.as_ref().map(|k| k.len()), Some(32));
+    assert_eq!(
+      cfg.source_url_encryption_key.as_ref().map(|k| k.len()),
+      Some(32)
+    );
   }
 
   #[test]

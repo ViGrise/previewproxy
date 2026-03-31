@@ -87,19 +87,23 @@ impl TransformParams {
       last
     };
 
-    // Pick the rightmost match across all delimiters
-    let split_pos = [
-      https_pos,
-      http_pos,
-      s3_pos,
-      local_pos,
-      local_pct_pos,
-      alias_pos,
-      enc_pos,
-    ]
-    .into_iter()
-    .flatten()
-    .max();
+    // enc/ takes priority: once found, everything after it is the encrypted blob
+    // and must not be re-scanned for nested URL delimiters (e.g. alias:/ inside the blob).
+    let split_pos = if let Some(pos) = enc_pos {
+      Some(pos)
+    } else {
+      [
+        https_pos,
+        http_pos,
+        s3_pos,
+        local_pos,
+        local_pct_pos,
+        alias_pos,
+      ]
+      .into_iter()
+      .flatten()
+      .max()
+    };
 
     let (opts_str, url) = if let Some(pos) = split_pos {
       (&path[..pos], &path[pos + 1..])
@@ -1554,6 +1558,18 @@ mod tests {
   #[test]
   fn test_from_path_enc_url_starts_with_enc_prefix() {
     let (_, url) = TransformParams::from_path("q80/enc/someblob").unwrap();
-    assert!(url.starts_with("enc/"), "url must start with enc/ for controller detection");
+    assert!(
+      url.starts_with("enc/"),
+      "url must start with enc/ for controller detection"
+    );
+  }
+
+  #[test]
+  fn test_from_path_enc_blob_containing_alias_url() {
+    // Regression: alias-style delimiter inside the blob must not shadow /enc/
+    let (params, url) = TransformParams::from_path("32x32/enc/cdn:/uploads/file.pdf").unwrap();
+    assert_eq!(params.w, Some(32));
+    assert_eq!(params.h, Some(32));
+    assert_eq!(url, "enc/cdn:/uploads/file.pdf");
   }
 }

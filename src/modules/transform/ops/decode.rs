@@ -119,7 +119,7 @@ fn decode_pdf(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
     .render_with_config(&render_config)
     .map_err(|_| ProxyError::PdfRenderError)?;
 
-  let img = bitmap.as_image();
+  let img = bitmap.as_image().map_err(|_| ProxyError::PdfRenderError)?;
   Ok(DynamicImage::ImageRgba8(img.into_rgba8()))
 }
 
