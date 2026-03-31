@@ -19,6 +19,7 @@ pub struct Configuration {
   // Security
   pub hmac_key: Option<String>,
   pub allowed_hosts: Vec<String>,
+  pub source_url_encryption_key: Option<Vec<u8>>,
   // Fetching
   pub fetch_timeout_secs: u64,
   pub max_source_bytes: u64,
@@ -70,6 +71,10 @@ fn env_var_u64(name: &str, default: u64) -> u64 {
     .ok()
     .and_then(|v| v.parse().ok())
     .unwrap_or(default)
+}
+
+fn parse_hex_key(name: &str, s: &str) -> Vec<u8> {
+  hex::decode(s).unwrap_or_else(|_| panic!("{name} must be a valid hex string"))
 }
 
 fn env_var_bool(name: &str) -> bool {
@@ -251,6 +256,8 @@ impl Configuration {
       listen_address,
       app_port,
       hmac_key: env_var_opt("HMAC_KEY"),
+      source_url_encryption_key: env_var_opt("SOURCE_URL_ENCRYPTION_KEY")
+        .map(|s| parse_hex_key("SOURCE_URL_ENCRYPTION_KEY", &s)),
       allowed_hosts,
       fetch_timeout_secs: env_var_u64("FETCH_TIMEOUT_SECS", 10),
       max_source_bytes: env_var_u64("MAX_SOURCE_BYTES", 20_971_520),
@@ -318,6 +325,14 @@ impl Configuration {
     if cfg.hmac_key.is_none() {
       tracing::warn!("HMAC_KEY is not set - all requests are unauthenticated");
     }
+    if let Some(key) = &cfg.source_url_encryption_key {
+      if !matches!(key.len(), 16 | 24 | 32) {
+        panic!(
+          "SOURCE_URL_ENCRYPTION_KEY decoded to {} bytes - must be 16, 24, or 32 (AES-128/192/256)",
+          key.len()
+        );
+      }
+    }
     if cfg.s3_enabled {
       if cfg.s3_bucket.is_none() {
         panic!("S3_ENABLED=true but S3_BUCKET is not set");
@@ -355,6 +370,13 @@ impl std::fmt::Debug for Configuration {
       .field("listen_address", &self.listen_address)
       .field("app_port", &self.app_port)
       .field("hmac_key", &self.hmac_key.as_ref().map(|_| "[redacted]"))
+      .field(
+        "source_url_encryption_key",
+        &self
+          .source_url_encryption_key
+          .as_ref()
+          .map(|k| format!("[redacted {} bytes]", k.len())),
+      )
       .field("allowed_hosts", &self.allowed_hosts)
       .field("fetch_timeout_secs", &self.fetch_timeout_secs)
       .field("max_source_bytes", &self.max_source_bytes)
@@ -706,5 +728,55 @@ mod tests {
     let cfg = super::Configuration::new();
     unsafe { std::env::remove_var("INPUT_DISALLOW_LIST") };
     assert_eq!(cfg.input_disallow.len(), 11);
+  }
+
+  #[test]
+  fn test_source_url_encryption_key_unset_is_none() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PORT", "8080");
+      std::env::set_var("APP_ENV", "development");
+      std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY");
+    }
+    let cfg = super::Configuration::new();
+    assert!(cfg.source_url_encryption_key.is_none());
+  }
+
+  #[test]
+  fn test_source_url_encryption_key_32_byte() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PORT", "8080");
+      std::env::set_var("APP_ENV", "development");
+      std::env::set_var(
+        "SOURCE_URL_ENCRYPTION_KEY",
+        "1eb5b0e971ad7f45324c1bb15c947cb207c43152fa5c6c7f35c4f36e0c18e0f1",
+      );
+    }
+    let cfg = super::Configuration::new();
+    unsafe { std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY") };
+    assert_eq!(
+      cfg.source_url_encryption_key.as_ref().map(|k| k.len()),
+      Some(32)
+    );
+  }
+
+  #[test]
+  fn test_source_url_encryption_key_wrong_length_panics() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PORT", "8080");
+      std::env::set_var("APP_ENV", "development");
+      // 68 hex chars = 34 bytes - invalid (not 16, 24, or 32)
+      std::env::set_var(
+        "SOURCE_URL_ENCRYPTION_KEY",
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef1234567890ab",
+      );
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      super::Configuration::new();
+    }));
+    unsafe { std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY") };
+    assert!(result.is_err(), "Expected panic for wrong key length");
   }
 }

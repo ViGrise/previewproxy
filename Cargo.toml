@@ -56,12 +56,15 @@ resvg = "0.47"
 psd = "0.3"
 jxl-oxide = "0.12"
 libheif-rs = { version = "2.7", default-features = false, features = ["v1_17"] }
-pdfium-render = "0.8.26"
+pdfium-render = "0.9.0"
 tempfile = "3"
 moka = { version = "0.12", features = ["future"] }
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hex = "0.4"
 infer = "0.19"
 dashmap = "6"
 ipnet = "2"

@@ -23,7 +23,7 @@ A fast, self-hosted image proxy written in Rust. Fetch images from HTTP URLs, S3
 - **Animated GIF pipeline** - output all frames of an animated GIF, optionally applying transforms to a selected frame range
 - **Video thumbnail extraction** - extract a frame from MP4, MKV, AVI and pass it through the normal transform pipeline
 - **Multi-tier cache** - L1 in-memory (moka) + L2 disk with singleflight dedup
-- **Security** - domain allowlist, optional HMAC request signing, configurable CORS origins, SSRF protection (private IP blocking, per-hop allowlist re-validation on redirects), input/output/transform disallow lists.
+- **Security** - domain allowlist, optional HMAC request signing, source URL encryption (AES-CBC), configurable CORS origins, SSRF protection (private IP blocking, per-hop allowlist re-validation on redirects), input/output/transform disallow lists.
 
 ## Request Styles
 
@@ -168,6 +168,7 @@ Configuration is read from environment variables (`.env` file) or CLI flags - CL
 | `--output-disallow-list`        | `OUTPUT_DISALLOW_LIST`        | -                              | Comma-separated output formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `ico`                              |
 | `--transform-disallow-list`     | `TRANSFORM_DISALLOW_LIST`     | -                              | Comma-separated transforms to block: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur`, `watermark`, `gif_anim` |
 | `--url-aliases`                 | `URL_ALIASES`                 | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests         |
+| -                               | `SOURCE_URL_ENCRYPTION_KEY`   | -                              | Hex-encoded AES key for source URL encryption (32/48/64 hex chars = AES-128/192/256); omit to disable                                  |
 | -                               | `BEST_FORMAT_COMPLEXITY_THRESHOLD` | `5.5`                      | Sobel edge density threshold; images below this are treated as low-complexity (lossless candidates included)                            |
 | -                               | `BEST_FORMAT_MAX_RESOLUTION`   | -                              | When set, images with resolution (megapixels) above this skip the multi-encode trial and pick one format                               |
 | -                               | `BEST_FORMAT_BY_DEFAULT`       | `false`                        | When true and no format is specified, use best-format selection instead of returning source format                                     |
@@ -244,6 +245,43 @@ Tokens: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur
 ### SSRF Protection
 
 Private, loopback, link-local, and reserved IP ranges (RFC 1918, RFC 6598, IPv6 ULA) are always blocked. On redirects, each hop's resolved IP and host are re-validated before following, preventing bypass via open redirectors.
+
+### Source URL Encryption
+
+Set `SOURCE_URL_ENCRYPTION_KEY` to hide upstream origins from request logs and CDN traces. Encrypt URLs with AES-CBC before putting them in requests; previewproxy decrypts server-side before fetching.
+
+**Configure the key** (hex-encoded, 32/48/64 hex chars for AES-128/192/256):
+
+```ini
+# Generate a key
+openssl rand -hex 32
+
+SOURCE_URL_ENCRYPTION_KEY=1eb5b0e971ad7f45324c1bb15c947cb207c43152fa5c6c7f35c4f36e0c18e0f1
+```
+
+**Encrypt a URL** using the built-in CLI helper:
+
+```bash
+previewproxy encrypt-url "https://cdn.example.com/photo.jpg" [--key <hex-key>]
+# stdout: <encrypted-blob>  (pipe-friendly)
+# stderr: /enc/<encrypted-blob>  (ready-to-use path)
+```
+
+**Use encrypted URLs in requests:**
+
+```bash
+# Path-style
+GET /300x200,webp/enc/<encrypted-blob>
+
+# Query-style
+GET /proxy?url=<encrypted-blob>&enc=1&w=300&h=200
+```
+
+The `enc` query flag (any value, or just its presence) signals that `url` is encrypted.
+
+> **Note:** The same source URL always produces the same encrypted blob (deterministic IV). This is intentional for CDN cache-hit compatibility. Rotate your key if you need to invalidate existing blobs.
+
+> **Recommended:** Use with `HMAC_KEY` signing to prevent padding oracle attacks on encrypted URLs.
 
 ### URL Aliases
 

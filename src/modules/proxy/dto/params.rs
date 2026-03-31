@@ -67,6 +67,7 @@ impl TransformParams {
     let local_pct_pos = path
       .rfind("/local:%2F")
       .or_else(|| path.rfind("/local:%2f"));
+    let enc_pos = path.rfind("/enc/");
 
     // Find last alias-style delimiter: /WORD:/ where WORD doesn't produce ://
     // Scan for ":/" occurrences and find the preceding "/" to get the split pos
@@ -86,18 +87,23 @@ impl TransformParams {
       last
     };
 
-    // Pick the rightmost match across all delimiters
-    let split_pos = [
-      https_pos,
-      http_pos,
-      s3_pos,
-      local_pos,
-      local_pct_pos,
-      alias_pos,
-    ]
-    .into_iter()
-    .flatten()
-    .max();
+    // enc/ takes priority: once found, everything after it is the encrypted blob
+    // and must not be re-scanned for nested URL delimiters (e.g. alias:/ inside the blob).
+    let split_pos = if let Some(pos) = enc_pos {
+      Some(pos)
+    } else {
+      [
+        https_pos,
+        http_pos,
+        s3_pos,
+        local_pos,
+        local_pct_pos,
+        alias_pos,
+      ]
+      .into_iter()
+      .flatten()
+      .max()
+    };
 
     let (opts_str, url) = if let Some(pos) = split_pos {
       (&path[..pos], &path[pos + 1..])
@@ -107,6 +113,7 @@ impl TransformParams {
       || path.starts_with("local:/")
       || path.starts_with("local:%2F")
       || path.starts_with("local:%2f")
+      || path.starts_with("enc/")
       || (path.contains(":/") && !path.contains("://"))
     {
       ("", path)
@@ -1531,5 +1538,38 @@ mod tests {
     let path = p("sig:abc123/https://example.com/img.jpg");
     let query = q(&[("sig", "abc123")]);
     assert_eq!(path.sig, query.sig);
+  }
+
+  #[test]
+  fn test_from_path_enc_with_params() {
+    let (params, url) = TransformParams::from_path("300x200/enc/ENCRYPTEDBLOB123").unwrap();
+    assert_eq!(params.w, Some(300));
+    assert_eq!(params.h, Some(200));
+    assert_eq!(url, "enc/ENCRYPTEDBLOB123");
+  }
+
+  #[test]
+  fn test_from_path_enc_no_params() {
+    let (params, url) = TransformParams::from_path("enc/ENCRYPTEDBLOB123").unwrap();
+    assert!(params.w.is_none());
+    assert_eq!(url, "enc/ENCRYPTEDBLOB123");
+  }
+
+  #[test]
+  fn test_from_path_enc_url_starts_with_enc_prefix() {
+    let (_, url) = TransformParams::from_path("q80/enc/someblob").unwrap();
+    assert!(
+      url.starts_with("enc/"),
+      "url must start with enc/ for controller detection"
+    );
+  }
+
+  #[test]
+  fn test_from_path_enc_blob_containing_alias_url() {
+    // Regression: alias-style delimiter inside the blob must not shadow /enc/
+    let (params, url) = TransformParams::from_path("32x32/enc/cdn:/uploads/file.pdf").unwrap();
+    assert_eq!(params.w, Some(32));
+    assert_eq!(params.h, Some(32));
+    assert_eq!(url, "enc/cdn:/uploads/file.pdf");
   }
 }
