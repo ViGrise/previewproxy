@@ -58,11 +58,11 @@ pub fn select_best_format(
   let is_complex = density >= cfg.complexity_threshold;
 
   // Fast path: image too large to trial-encode all formats
-  if cfg.max_resolution.map_or(false, |max| mpx > max) {
+  if cfg.max_resolution.is_some_and(|max| mpx > max) {
     let fmt = if is_complex { "webp" } else { "png" };
-    if format_to_disallow_token(fmt).map_or(false, |t| output_disallow.contains(&t)) {
+    if format_to_disallow_token(fmt).is_some_and(|t| output_disallow.contains(&t)) {
       let fallback = if is_complex { "png" } else { "webp" };
-      if format_to_disallow_token(fallback).map_or(false, |t| output_disallow.contains(&t)) {
+      if format_to_disallow_token(fallback).is_some_and(|t| output_disallow.contains(&t)) {
         return Err(ProxyError::TransformDisabled("best".to_string()));
       }
       return encode::encode(img.clone(), fallback, quality);
@@ -78,7 +78,7 @@ pub fn select_best_format(
   let candidates: Vec<&str> = candidates
     .into_iter()
     .filter(|fmt| {
-      format_to_disallow_token(fmt).map_or(true, |t| !output_disallow.contains(&t))
+      format_to_disallow_token(fmt).is_none_or(|t| !output_disallow.contains(&t))
     })
     .collect();
 
@@ -89,7 +89,7 @@ pub fn select_best_format(
   let mut best: Option<(Vec<u8>, String)> = None;
   for fmt in candidates {
     if let Ok(result) = encode::encode(img.clone(), fmt, quality) {
-      let is_smaller = best.as_ref().map_or(true, |(b, _)| result.0.len() < b.len());
+      let is_smaller = best.as_ref().is_none_or(|(b, _)| result.0.len() < b.len());
       if is_smaller {
         best = Some(result);
       }
