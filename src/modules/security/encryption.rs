@@ -65,6 +65,13 @@ fn aes_decrypt(key: &[u8], iv: &[u8; 16], data: &[u8]) -> Result<Vec<u8>, Encryp
   .map_err(|_| EncryptionError::InvalidPadding)
 }
 
+/// Encrypts `plaintext` with AES-CBC using the given `key`.
+///
+/// The IV is derived deterministically as HMAC-SHA256(key, plaintext) truncated to 16 bytes.
+/// This means the same URL always produces the same encrypted blob, which is intentional for
+/// CDN cache-hit compatibility. The trade-off is that an observer can tell when two blobs
+/// represent the same underlying URL. Acceptable for this use case; rotate keys if confidentiality
+/// of URL equality is required.
 pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, EncryptionError> {
   validate_key(key)?;
   let iv = derive_iv(key, plaintext);
@@ -82,8 +89,7 @@ pub fn decrypt(key: &[u8], blob: &str) -> Result<String, EncryptionError> {
     return Err(EncryptionError::BlobTooShort);
   }
   let (iv_bytes, ciphertext) = raw.split_at(16);
-  let mut iv = [0u8; 16];
-  iv.copy_from_slice(iv_bytes);
+  let iv: [u8; 16] = iv_bytes.try_into().expect("split_at(16) guarantees 16 bytes");
   let plaintext_bytes = aes_decrypt(key, &iv, ciphertext)?;
   String::from_utf8(plaintext_bytes).map_err(|_| EncryptionError::InvalidUtf8)
 }
