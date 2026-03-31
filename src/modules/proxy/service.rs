@@ -27,6 +27,7 @@ pub struct ProxyService {
   input_disallow: std::collections::HashSet<crate::common::config::DisallowedInput>,
   output_disallow: std::collections::HashSet<crate::common::config::DisallowedOutput>,
   transform_disallow: std::collections::HashSet<crate::common::config::DisallowedTransform>,
+  best_format: crate::common::config::BestFormatConfig,
 }
 
 impl ProxyService {
@@ -44,6 +45,7 @@ impl ProxyService {
       input_disallow: state.cfg.input_disallow.clone(),
       output_disallow: state.cfg.output_disallow.clone(),
       transform_disallow: state.cfg.transform_disallow.clone(),
+      best_format: state.cfg.best_format.clone(),
     }
   }
 
@@ -309,8 +311,10 @@ impl ProxyService {
     let is_pdf =
       src_ct.as_deref() == Some("application/pdf") || (!is_video && src_bytes.starts_with(b"%PDF"));
 
-    // 10. If has_transforms or is_pdf: run_pipeline(); else resolve_content_type()
-    let pipeline_result = if params.has_transforms() || is_pdf {
+    // 10. If has_transforms or is_pdf or best_format: run_pipeline(); else resolve_content_type()
+    let needs_best = params.format.as_deref() == Some("best")
+      || (params.format.is_none() && self.best_format.by_default);
+    let pipeline_result = if params.has_transforms() || is_pdf || needs_best {
       pipeline::run_pipeline(
         params,
         src_bytes,
@@ -318,6 +322,7 @@ impl ProxyService {
         self.fetcher.clone(),
         &self.output_disallow,
         &self.transform_disallow,
+        &self.best_format,
       )
       .await
       .map(|(bytes, ct)| CacheEntry {
@@ -461,6 +466,7 @@ mod tests {
       input_disallow: std::collections::HashSet::new(),
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
+      best_format: crate::common::config::BestFormatConfig::default(),
     }
   }
 
@@ -547,6 +553,7 @@ mod tests {
       input_disallow: std::collections::HashSet::new(),
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
+      best_format: crate::common::config::BestFormatConfig::default(),
     };
 
     let params = TransformParams::default();
@@ -604,6 +611,7 @@ mod tests {
       input_disallow,
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
+      best_format: crate::common::config::BestFormatConfig::default(),
     };
     let params = TransformParams::default();
     let result = svc
@@ -685,6 +693,7 @@ mod streaming_tests {
       input_disallow: std::collections::HashSet::new(),
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
+      best_format: crate::common::config::BestFormatConfig::default(),
     };
     (svc, cache)
   }

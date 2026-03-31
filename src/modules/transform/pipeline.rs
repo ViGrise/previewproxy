@@ -57,15 +57,25 @@ pub async fn run_pipeline(
   fetcher: Arc<dyn Fetchable>,
   output_disallow: &std::collections::HashSet<crate::common::config::DisallowedOutput>,
   transform_disallow: &std::collections::HashSet<crate::common::config::DisallowedTransform>,
+  best_format_cfg: &crate::common::config::BestFormatConfig,
 ) -> Result<(Vec<u8>, String), ProxyError> {
   // 1. Validate content-type
   let resolved_ct = resolve_content_type(src_content_type.as_deref(), &src_bytes)?;
   let is_document = resolved_ct == "application/pdf";
 
+  // Resolve effective format: "best" if explicitly requested or by-default with no format
+  let effective_fmt: String = if params.format.as_deref() == Some("best")
+    || (params.format.is_none() && best_format_cfg.by_default)
+  {
+    "best".to_string()
+  } else {
+    params.format.clone().unwrap_or_else(|| "jpeg".to_string())
+  };
+
   // Output disallow / format validation
-  if let Some(fmt) = params.format.as_deref() {
+  if effective_fmt != "best" {
     use crate::common::config::DisallowedOutput;
-    let token: Option<DisallowedOutput> = match fmt {
+    let token: Option<DisallowedOutput> = match effective_fmt.as_str() {
       "jpeg" => Some(DisallowedOutput::Jpeg),
       "png" => Some(DisallowedOutput::Png),
       "gif" => Some(DisallowedOutput::Gif),
@@ -75,12 +85,12 @@ pub async fn run_pipeline(
       "bmp" => Some(DisallowedOutput::Bmp),
       "tiff" => Some(DisallowedOutput::Tiff),
       "ico" => Some(DisallowedOutput::Ico),
-      _ => return Err(ProxyError::UnsupportedFormat(fmt.to_string())),
+      _ => return Err(ProxyError::UnsupportedFormat(effective_fmt.clone())),
     };
     if let Some(t) = token
       && output_disallow.contains(&t)
     {
-      return Err(ProxyError::TransformDisabled(fmt.to_string()));
+      return Err(ProxyError::TransformDisabled(effective_fmt.clone()));
     }
   }
 
@@ -123,7 +133,8 @@ pub async fn run_pipeline(
   }
 
   // 2. Passthrough: no transforms → return as-is with resolved content-type
-  if !params.has_transforms() && !is_document {
+  let is_best = effective_fmt == "best";
+  if !params.has_transforms() && !is_best && !is_document {
     return Ok((src_bytes, resolved_ct));
   }
 
@@ -140,6 +151,9 @@ pub async fn run_pipeline(
   };
 
   // 4. Run synchronous image ops in spawn_blocking
+  let best_format_cfg_clone = best_format_cfg.clone();
+  let output_disallow_clone = output_disallow.clone();
+  let effective_fmt_clone = effective_fmt.clone();
   let params_clone = params.clone();
 
   // 4a. Animated GIF path
@@ -209,9 +223,21 @@ pub async fn run_pipeline(
     }
 
     // Encode
-    let fmt = params_clone.format.as_deref().unwrap_or("jpeg");
     let quality = params_clone.q.unwrap_or(85);
-    ops::encode::encode(img, fmt, quality)
+    let result = if effective_fmt_clone == "best" {
+      ops::best_format::select_best_format(&img, quality, &best_format_cfg_clone, &output_disallow_clone)
+    } else {
+      ops::encode::encode(img, effective_fmt_clone.as_str(), quality)
+    }?;
+
+    // Allow-skips: if best format selected the same format as source, and no non-format transforms
+    if best_format_cfg_clone.allow_skips
+      && !params_clone.has_non_format_transforms()
+      && result.1 == resolved_ct_clone
+    {
+      return Ok((src_bytes, resolved_ct_clone));
+    }
+    Ok(result)
   })
   .await
   .map_err(|e| ProxyError::InternalError(format!("spawn_blocking panic: {e}")))?
@@ -224,6 +250,17 @@ mod tests {
   use crate::modules::security::allowlist::Allowlist;
   use crate::modules::transform::test_helpers::tiny_png_bytes;
   use std::sync::Arc;
+
+  fn best_format_cfg_default() -> crate::common::config::BestFormatConfig {
+    crate::common::config::BestFormatConfig::default()
+  }
+
+  fn best_format_cfg_by_default() -> crate::common::config::BestFormatConfig {
+    crate::common::config::BestFormatConfig {
+      by_default: true,
+      ..crate::common::config::BestFormatConfig::default()
+    }
+  }
 
   fn test_fetcher() -> Arc<dyn Fetchable> {
     use crate::modules::proxy::sources::http::HttpFetcher;
@@ -244,6 +281,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -267,6 +305,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -284,6 +323,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await;
     assert!(matches!(
@@ -303,6 +343,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -344,6 +385,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -374,6 +416,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -400,6 +443,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -425,6 +469,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await
     .unwrap();
@@ -448,6 +493,7 @@ mod tests {
       test_fetcher(),
       &output_disallow,
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await;
     assert!(matches!(
@@ -472,6 +518,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &transform_disallow,
+      &best_format_cfg_default(),
     )
     .await;
     assert!(matches!(
@@ -496,6 +543,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &transform_disallow,
+      &best_format_cfg_default(),
     )
     .await;
     assert!(matches!(
@@ -518,6 +566,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await;
     assert!(result.is_ok());
@@ -538,6 +587,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await;
     assert!(
@@ -559,6 +609,7 @@ mod tests {
       test_fetcher(),
       &output_disallow,
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await;
     assert!(matches!(
@@ -580,6 +631,7 @@ mod tests {
       test_fetcher(),
       &std::collections::HashSet::new(),
       &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
     )
     .await;
     assert!(
@@ -589,5 +641,100 @@ mod tests {
       ),
       "expected UnsupportedFormat for unknown format value, got: {result:?}"
     );
+  }
+
+  #[tokio::test]
+  async fn test_best_format_breaks_passthrough() {
+    let params = TransformParams {
+      format: Some("best".to_string()),
+      ..Default::default()
+    };
+    let bytes = tiny_png_bytes();
+    let (out, ct) = run_pipeline(
+      params,
+      bytes.clone(),
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
+    )
+    .await
+    .unwrap();
+    assert!(!out.is_empty());
+    assert!(ct.starts_with("image/"));
+  }
+
+  #[tokio::test]
+  async fn test_best_format_by_default_no_format_set() {
+    let params = TransformParams {
+      w: Some(4),
+      ..Default::default()
+    };
+    let bytes = tiny_png_bytes();
+    let (out, ct) = run_pipeline(
+      params,
+      bytes,
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &std::collections::HashSet::new(),
+      &best_format_cfg_by_default(),
+    )
+    .await
+    .unwrap();
+    assert!(!out.is_empty());
+    assert!(ct.starts_with("image/"));
+  }
+
+  #[tokio::test]
+  async fn test_allow_skips_same_format_passthrough() {
+    let params = TransformParams {
+      format: Some("best".to_string()),
+      ..Default::default()
+    };
+    let bytes = tiny_png_bytes();
+    let cfg = crate::common::config::BestFormatConfig {
+      allow_skips: true,
+      complexity_threshold: 99.0,
+      ..crate::common::config::BestFormatConfig::default()
+    };
+    let result = run_pipeline(
+      params,
+      bytes,
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &std::collections::HashSet::new(),
+      &cfg,
+    )
+    .await;
+    assert!(result.is_ok());
+  }
+
+  #[tokio::test]
+  async fn test_allow_skips_with_transform_does_not_skip() {
+    let params = TransformParams {
+      format: Some("best".to_string()),
+      w: Some(2),
+      ..Default::default()
+    };
+    let bytes = tiny_png_bytes();
+    let cfg = crate::common::config::BestFormatConfig {
+      allow_skips: true,
+      ..crate::common::config::BestFormatConfig::default()
+    };
+    let (out, _ct) = run_pipeline(
+      params,
+      bytes,
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &std::collections::HashSet::new(),
+      &cfg,
+    )
+    .await
+    .unwrap();
+    assert!(!out.is_empty());
   }
 }
