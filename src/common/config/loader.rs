@@ -58,12 +58,15 @@ pub struct Configuration {
   pub best_format: BestFormatConfig,
 }
 
-fn env_var(name: &str) -> String {
-  std::env::var(name).unwrap_or_else(|_| panic!("Missing env var: {name}"))
-}
-
 fn env_var_opt(name: &str) -> Option<String> {
   std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+fn env_var_u16(name: &str, default: u16) -> u16 {
+  std::env::var(name)
+    .ok()
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(default)
 }
 
 fn env_var_u64(name: &str, default: u64) -> u64 {
@@ -231,22 +234,21 @@ fn parse_preferred_formats(s: &str) -> Vec<String> {
 
 impl Configuration {
   pub fn new() -> Config {
-    let env = env_var("APP_ENV")
+    let env = env_var_opt("PREVIEWPROXY_APP_ENV")
+      .unwrap_or_else(|| "development".to_string())
       .parse::<Environment>()
       .expect("APP_ENV must be 'development' or 'production'");
-    let app_port = env_var("PORT")
-      .parse::<u16>()
-      .expect("PORT must be a valid u16");
+    let app_port = env_var_u16("PREVIEWPROXY_PORT", 8080);
     let listen_address = SocketAddr::from((Ipv4Addr::UNSPECIFIED, app_port));
 
-    let allowed_hosts = std::env::var("ALLOWED_HOSTS")
+    let allowed_hosts = std::env::var("PREVIEWPROXY_ALLOWED_HOSTS")
       .unwrap_or_default()
       .split(',')
       .map(|s| s.trim().to_string())
       .filter(|s| !s.is_empty())
       .collect();
 
-    let max_concurrent_requests = env_var_u64("MAX_CONCURRENT_REQUESTS", 256) as usize;
+    let max_concurrent_requests = env_var_u64("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS", 256) as usize;
     if max_concurrent_requests == 0 {
       panic!("MAX_CONCURRENT_REQUESTS must be > 0");
     }
@@ -255,33 +257,37 @@ impl Configuration {
       env,
       listen_address,
       app_port,
-      hmac_key: env_var_opt("HMAC_KEY"),
-      source_url_encryption_key: env_var_opt("SOURCE_URL_ENCRYPTION_KEY")
-        .map(|s| parse_hex_key("SOURCE_URL_ENCRYPTION_KEY", &s)),
+      hmac_key: env_var_opt("PREVIEWPROXY_HMAC_KEY"),
+      source_url_encryption_key: env_var_opt("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY")
+        .map(|s| parse_hex_key("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY", &s)),
       allowed_hosts,
-      fetch_timeout_secs: env_var_u64("FETCH_TIMEOUT_SECS", 10),
-      max_source_bytes: env_var_u64("MAX_SOURCE_BYTES", 20_971_520),
-      cache_memory_max_mb: env_var_u64("CACHE_MEMORY_MAX_MB", 256),
-      cache_memory_ttl_secs: env_var_u64("CACHE_MEMORY_TTL_SECS", 3600),
-      cache_dir: std::env::var("CACHE_DIR").unwrap_or_else(|_| "/tmp/previewproxy".to_string()),
-      cache_disk_ttl_secs: env_var_u64("CACHE_DISK_TTL_SECS", 86400),
-      cache_disk_max_mb: env_var_opt("CACHE_DISK_MAX_MB").and_then(|v| v.parse().ok()),
-      cache_cleanup_interval_secs: env_var_u64("CACHE_CLEANUP_INTERVAL_SECS", 600),
-      s3_enabled: env_var_bool("S3_ENABLED"),
-      s3_bucket: env_var_opt("S3_BUCKET"),
-      s3_region: std::env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-      s3_access_key_id: env_var_opt("S3_ACCESS_KEY_ID"),
-      s3_secret_access_key: env_var_opt("S3_SECRET_ACCESS_KEY"),
-      s3_endpoint: env_var_opt("S3_ENDPOINT"),
-      local_enabled: env_var_bool("LOCAL_ENABLED"),
-      local_base_dir: env_var_opt("LOCAL_BASE_DIR"),
-      ffmpeg_path: std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string()),
+      fetch_timeout_secs: env_var_u64("PREVIEWPROXY_FETCH_TIMEOUT_SECS", 10),
+      max_source_bytes: env_var_u64("PREVIEWPROXY_MAX_SOURCE_BYTES", 20_971_520),
+      cache_memory_max_mb: env_var_u64("PREVIEWPROXY_CACHE_MEMORY_MAX_MB", 256),
+      cache_memory_ttl_secs: env_var_u64("PREVIEWPROXY_CACHE_MEMORY_TTL_SECS", 3600),
+      cache_dir: std::env::var("PREVIEWPROXY_CACHE_DIR")
+        .unwrap_or_else(|_| "/tmp/previewproxy".to_string()),
+      cache_disk_ttl_secs: env_var_u64("PREVIEWPROXY_CACHE_DISK_TTL_SECS", 86400),
+      cache_disk_max_mb: env_var_opt("PREVIEWPROXY_CACHE_DISK_MAX_MB").and_then(|v| v.parse().ok()),
+      cache_cleanup_interval_secs: env_var_u64("PREVIEWPROXY_CACHE_CLEANUP_INTERVAL_SECS", 600),
+      s3_enabled: env_var_bool("PREVIEWPROXY_S3_ENABLED"),
+      s3_bucket: env_var_opt("PREVIEWPROXY_S3_BUCKET"),
+      s3_region: std::env::var("PREVIEWPROXY_S3_REGION")
+        .unwrap_or_else(|_| "us-east-1".to_string()),
+      s3_access_key_id: env_var_opt("PREVIEWPROXY_S3_ACCESS_KEY_ID"),
+      s3_secret_access_key: env_var_opt("PREVIEWPROXY_S3_SECRET_ACCESS_KEY"),
+      s3_endpoint: env_var_opt("PREVIEWPROXY_S3_ENDPOINT"),
+      local_enabled: env_var_bool("PREVIEWPROXY_LOCAL_ENABLED"),
+      local_base_dir: env_var_opt("PREVIEWPROXY_LOCAL_BASE_DIR"),
+      ffmpeg_path: std::env::var("PREVIEWPROXY_FFMPEG_PATH")
+        .unwrap_or_else(|_| "ffmpeg".to_string()),
       ffprobe_path: {
-        let explicit = std::env::var("FFPROBE_PATH").unwrap_or_default();
+        let explicit = std::env::var("PREVIEWPROXY_FFPROBE_PATH").unwrap_or_default();
         if !explicit.is_empty() {
           explicit
         } else {
-          let ffmpeg = std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
+          let ffmpeg =
+            std::env::var("PREVIEWPROXY_FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
           let path = std::path::Path::new(&ffmpeg);
           match path.parent() {
             Some(dir) if dir != std::path::Path::new("") => {
@@ -291,34 +297,37 @@ impl Configuration {
           }
         }
       },
-      cors_allow_origin: std::env::var("CORS_ALLOW_ORIGIN")
+      cors_allow_origin: std::env::var("PREVIEWPROXY_CORS_ALLOW_ORIGIN")
         .unwrap_or_else(|_| "*".to_string())
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect(),
-      cors_max_age_secs: env_var_u64("CORS_MAX_AGE_SECS", 600),
+      cors_max_age_secs: env_var_u64("PREVIEWPROXY_CORS_MAX_AGE_SECS", 600),
       max_concurrent_requests,
       input_disallow: parse_input_disallow(
-        &std::env::var("INPUT_DISALLOW_LIST").unwrap_or_default(),
+        &std::env::var("PREVIEWPROXY_INPUT_DISALLOW_LIST").unwrap_or_default(),
       ),
       output_disallow: parse_output_disallow(
-        &std::env::var("OUTPUT_DISALLOW_LIST").unwrap_or_default(),
+        &std::env::var("PREVIEWPROXY_OUTPUT_DISALLOW_LIST").unwrap_or_default(),
       ),
       transform_disallow: parse_transform_disallow(
-        &std::env::var("TRANSFORM_DISALLOW_LIST").unwrap_or_default(),
+        &std::env::var("PREVIEWPROXY_TRANSFORM_DISALLOW_LIST").unwrap_or_default(),
       ),
-      url_aliases: parse_url_aliases(&std::env::var("URL_ALIASES").unwrap_or_default()),
+      url_aliases: parse_url_aliases(
+        &std::env::var("PREVIEWPROXY_URL_ALIASES").unwrap_or_default(),
+      ),
       best_format: BestFormatConfig {
-        complexity_threshold: std::env::var("BEST_FORMAT_COMPLEXITY_THRESHOLD")
+        complexity_threshold: std::env::var("PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD")
           .ok()
           .and_then(|v| v.parse().ok())
           .unwrap_or(5.5),
-        max_resolution: env_var_opt("BEST_FORMAT_MAX_RESOLUTION").and_then(|v| v.parse().ok()),
-        by_default: env_var_bool("BEST_FORMAT_BY_DEFAULT"),
-        allow_skips: env_var_bool("BEST_FORMAT_ALLOW_SKIPS"),
+        max_resolution: env_var_opt("PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION")
+          .and_then(|v| v.parse().ok()),
+        by_default: env_var_bool("PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT"),
+        allow_skips: env_var_bool("PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS"),
         preferred_formats: parse_preferred_formats(
-          &std::env::var("BEST_FORMAT_PREFERRED_FORMATS").unwrap_or_default(),
+          &std::env::var("PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS").unwrap_or_default(),
         ),
       },
     });
@@ -458,9 +467,9 @@ mod tests {
   fn test_config_new() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::remove_var("MAX_CONCURRENT_REQUESTS");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::remove_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS");
     }
     let cfg = super::Configuration::new();
     assert_eq!(cfg.app_port, 8080);
@@ -483,9 +492,9 @@ mod tests {
   fn test_max_concurrent_requests_default() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::remove_var("MAX_CONCURRENT_REQUESTS");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::remove_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS");
     }
     let cfg = super::Configuration::new();
     assert_eq!(cfg.max_concurrent_requests, 256);
@@ -495,12 +504,12 @@ mod tests {
   fn test_max_concurrent_requests_from_env() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("MAX_CONCURRENT_REQUESTS", "64");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS", "64");
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("MAX_CONCURRENT_REQUESTS") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS") };
     assert_eq!(cfg.max_concurrent_requests, 64);
   }
 
@@ -508,14 +517,14 @@ mod tests {
   fn test_max_concurrent_requests_zero_panics() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("MAX_CONCURRENT_REQUESTS", "0");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS", "0");
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       super::Configuration::new();
     }));
-    unsafe { std::env::remove_var("MAX_CONCURRENT_REQUESTS") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS") };
     assert!(result.is_err(), "Expected Configuration::new() to panic");
   }
 
@@ -523,11 +532,11 @@ mod tests {
   fn test_disallow_defaults_when_unset() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::remove_var("INPUT_DISALLOW_LIST");
-      std::env::remove_var("OUTPUT_DISALLOW_LIST");
-      std::env::remove_var("TRANSFORM_DISALLOW_LIST");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::remove_var("PREVIEWPROXY_INPUT_DISALLOW_LIST");
+      std::env::remove_var("PREVIEWPROXY_OUTPUT_DISALLOW_LIST");
+      std::env::remove_var("PREVIEWPROXY_TRANSFORM_DISALLOW_LIST");
     }
     let cfg = super::Configuration::new();
     assert!(cfg.input_disallow.is_empty());
@@ -539,17 +548,17 @@ mod tests {
   fn test_disallow_empty_string_means_all_allowed() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("INPUT_DISALLOW_LIST", "");
-      std::env::set_var("OUTPUT_DISALLOW_LIST", "");
-      std::env::set_var("TRANSFORM_DISALLOW_LIST", "");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_INPUT_DISALLOW_LIST", "");
+      std::env::set_var("PREVIEWPROXY_OUTPUT_DISALLOW_LIST", "");
+      std::env::set_var("PREVIEWPROXY_TRANSFORM_DISALLOW_LIST", "");
     }
     let cfg = super::Configuration::new();
     unsafe {
-      std::env::remove_var("INPUT_DISALLOW_LIST");
-      std::env::remove_var("OUTPUT_DISALLOW_LIST");
-      std::env::remove_var("TRANSFORM_DISALLOW_LIST");
+      std::env::remove_var("PREVIEWPROXY_INPUT_DISALLOW_LIST");
+      std::env::remove_var("PREVIEWPROXY_OUTPUT_DISALLOW_LIST");
+      std::env::remove_var("PREVIEWPROXY_TRANSFORM_DISALLOW_LIST");
     }
     assert!(cfg.input_disallow.is_empty());
     assert!(cfg.output_disallow.is_empty());
@@ -560,12 +569,12 @@ mod tests {
   fn test_disallow_unknown_token_does_not_panic() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("TRANSFORM_DISALLOW_LIST", "blur,not_a_real_op");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_TRANSFORM_DISALLOW_LIST", "blur,not_a_real_op");
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("TRANSFORM_DISALLOW_LIST") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_TRANSFORM_DISALLOW_LIST") };
     assert!(
       cfg
         .transform_disallow
@@ -578,9 +587,9 @@ mod tests {
   fn test_url_aliases_unset_is_none() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::remove_var("URL_ALIASES");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::remove_var("PREVIEWPROXY_URL_ALIASES");
     }
     let cfg = super::Configuration::new();
     assert!(cfg.url_aliases.is_none());
@@ -590,12 +599,12 @@ mod tests {
   fn test_url_aliases_empty_is_none() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("URL_ALIASES", "");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_URL_ALIASES", "");
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("URL_ALIASES") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_URL_ALIASES") };
     assert!(cfg.url_aliases.is_none());
   }
 
@@ -603,15 +612,15 @@ mod tests {
   fn test_url_aliases_valid_parses() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
       std::env::set_var(
-        "URL_ALIASES",
+        "PREVIEWPROXY_URL_ALIASES",
         "mycdn=https://img.example.com,cdn2=https://other.com",
       );
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("URL_ALIASES") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_URL_ALIASES") };
     let map = cfg.url_aliases.clone().unwrap();
     assert_eq!(
       map.get("mycdn").map(|s| s.as_str()),
@@ -627,15 +636,15 @@ mod tests {
   fn test_url_aliases_skips_empty_name() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
       std::env::set_var(
-        "URL_ALIASES",
+        "PREVIEWPROXY_URL_ALIASES",
         "=https://img.example.com,valid=https://ok.com",
       );
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("URL_ALIASES") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_URL_ALIASES") };
     let map = cfg.url_aliases.clone().unwrap();
     assert_eq!(map.len(), 1);
     assert!(map.contains_key("valid"));
@@ -645,15 +654,15 @@ mod tests {
   fn test_url_aliases_skips_non_http_base() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
       std::env::set_var(
-        "URL_ALIASES",
+        "PREVIEWPROXY_URL_ALIASES",
         "bad=file:///etc/passwd,ok=https://img.example.com",
       );
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("URL_ALIASES") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_URL_ALIASES") };
     let map = cfg.url_aliases.clone().unwrap();
     assert_eq!(map.len(), 1);
     assert!(map.contains_key("ok"));
@@ -663,12 +672,12 @@ mod tests {
   fn test_url_aliases_all_invalid_is_none() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("URL_ALIASES", "bad=file:///etc/passwd");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_URL_ALIASES", "bad=file:///etc/passwd");
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("URL_ALIASES") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_URL_ALIASES") };
     assert!(cfg.url_aliases.is_none());
   }
 
@@ -676,12 +685,12 @@ mod tests {
   fn test_best_format_defaults() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::remove_var("BEST_FORMAT_COMPLEXITY_THRESHOLD");
-      std::env::remove_var("BEST_FORMAT_MAX_RESOLUTION");
-      std::env::remove_var("BEST_FORMAT_BY_DEFAULT");
-      std::env::remove_var("BEST_FORMAT_ALLOW_SKIPS");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS");
     }
     let cfg = super::Configuration::new();
     assert!((cfg.best_format.complexity_threshold - 5.5).abs() < f64::EPSILON);
@@ -694,19 +703,19 @@ mod tests {
   fn test_best_format_from_env() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::set_var("BEST_FORMAT_COMPLEXITY_THRESHOLD", "8.0");
-      std::env::set_var("BEST_FORMAT_MAX_RESOLUTION", "4.0");
-      std::env::set_var("BEST_FORMAT_BY_DEFAULT", "true");
-      std::env::set_var("BEST_FORMAT_ALLOW_SKIPS", "1");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD", "8.0");
+      std::env::set_var("PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION", "4.0");
+      std::env::set_var("PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT", "true");
+      std::env::set_var("PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS", "1");
     }
     let cfg = super::Configuration::new();
     unsafe {
-      std::env::remove_var("BEST_FORMAT_COMPLEXITY_THRESHOLD");
-      std::env::remove_var("BEST_FORMAT_MAX_RESOLUTION");
-      std::env::remove_var("BEST_FORMAT_BY_DEFAULT");
-      std::env::remove_var("BEST_FORMAT_ALLOW_SKIPS");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT");
+      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS");
     }
     assert!((cfg.best_format.complexity_threshold - 8.0).abs() < f64::EPSILON);
     assert_eq!(cfg.best_format.max_resolution, Some(4.0));
@@ -718,15 +727,15 @@ mod tests {
   fn test_input_disallow_parses_all_tokens() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
       std::env::set_var(
-        "INPUT_DISALLOW_LIST",
+        "PREVIEWPROXY_INPUT_DISALLOW_LIST",
         "jpeg,png,gif,webp,avif,jxl,bmp,tiff,pdf,psd,video",
       );
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("INPUT_DISALLOW_LIST") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_INPUT_DISALLOW_LIST") };
     assert_eq!(cfg.input_disallow.len(), 11);
   }
 
@@ -734,9 +743,9 @@ mod tests {
   fn test_source_url_encryption_key_unset_is_none() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
-      std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+      std::env::remove_var("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY");
     }
     let cfg = super::Configuration::new();
     assert!(cfg.source_url_encryption_key.is_none());
@@ -746,15 +755,15 @@ mod tests {
   fn test_source_url_encryption_key_32_byte() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
       std::env::set_var(
-        "SOURCE_URL_ENCRYPTION_KEY",
+        "PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY",
         "1eb5b0e971ad7f45324c1bb15c947cb207c43152fa5c6c7f35c4f36e0c18e0f1",
       );
     }
     let cfg = super::Configuration::new();
-    unsafe { std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY") };
     assert_eq!(
       cfg.source_url_encryption_key.as_ref().map(|k| k.len()),
       Some(32)
@@ -765,18 +774,18 @@ mod tests {
   fn test_source_url_encryption_key_wrong_length_panics() {
     let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
-      std::env::set_var("PORT", "8080");
-      std::env::set_var("APP_ENV", "development");
+      std::env::set_var("PREVIEWPROXY_PORT", "8080");
+      std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
       // 68 hex chars = 34 bytes - invalid (not 16, 24, or 32)
       std::env::set_var(
-        "SOURCE_URL_ENCRYPTION_KEY",
+        "PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY",
         "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef1234567890ab",
       );
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       super::Configuration::new();
     }));
-    unsafe { std::env::remove_var("SOURCE_URL_ENCRYPTION_KEY") };
+    unsafe { std::env::remove_var("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY") };
     assert!(result.is_err(), "Expected panic for wrong key length");
   }
 }

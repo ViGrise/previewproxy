@@ -119,8 +119,8 @@ Installs to `%LOCALAPPDATA%\previewproxy\bin` and adds it to your user `PATH`. O
 
 ```shell
 docker run -d -p 8080:8080 \
-  -e ALLOWED_HOSTS=img.example.com \
-  -e HMAC_KEY=mysecret \
+  -e PREVIEWPROXY_ALLOWED_HOSTS=img.example.com \
+  -e PREVIEWPROXY_HMAC_KEY=mysecret \
   ghcr.io/vigrise/previewproxy:latest
 ```
 
@@ -146,44 +146,44 @@ previewproxy upgrade
 
 Configuration is read from environment variables (`.env` file) or CLI flags - CLI flags take precedence.
 
-| Flag                                 | Env var                            | Default                        | Description                                                                                                                             |
-| ------------------------------------ | ---------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `--port`, `-p`                       | `PORT`                             | `8080`                         | Server port                                                                                                                             |
-| `--env`, `-E`                        | `APP_ENV`                          | `development`                  | `development` or `production`                                                                                                           |
-| `--max-concurrent-requests`          | `MAX_CONCURRENT_REQUESTS`          | `256`                          | Max number of concurrent requests before returning 503                                                                                  |
-| `--rust-log`                         | `RUST_LOG`                         | `previewproxy=info,...`        | Log level filter                                                                                                                        |
-| `--hmac-key`, `-k`                   | `HMAC_KEY`                         | -                              | HMAC signing key; omit to disable                                                                                                       |
-| `--allowed-hosts`, `-a`              | `ALLOWED_HOSTS`                    | -                              | Comma-separated allowed domains; empty = allow all                                                                                      |
-| `--source-url-encryption-key`        | `SOURCE_URL_ENCRYPTION_KEY`        | -                              | Hex-encoded AES key for source URL encryption (32/48/64 hex chars = AES-128/192/256); omit to disable                                   |
-| `--fetch-timeout-secs`, `-t`         | `FETCH_TIMEOUT_SECS`               | `10`                           | Upstream fetch timeout (seconds)                                                                                                        |
-| `--max-source-bytes`, `-s`           | `MAX_SOURCE_BYTES`                 | `20971520`                     | Max source image size (bytes)                                                                                                           |
-| `--cache-memory-max-mb`              | `CACHE_MEMORY_MAX_MB`              | `256`                          | L1 in-memory cache size (MB)                                                                                                            |
-| `--cache-memory-ttl-secs`            | `CACHE_MEMORY_TTL_SECS`            | `3600`                         | L1 cache TTL (seconds)                                                                                                                  |
-| `--cache-dir`, `-D`                  | `CACHE_DIR`                        | `/tmp/previewproxy`            | L2 disk cache directory                                                                                                                 |
-| `--cache-disk-ttl-secs`              | `CACHE_DISK_TTL_SECS`              | `86400`                        | L2 cache TTL (seconds)                                                                                                                  |
-| `--cache-disk-max-mb`                | `CACHE_DISK_MAX_MB`                | -                              | L2 disk cache size limit (MB); empty = unlimited                                                                                        |
-| `--cache-cleanup-interval-secs`      | `CACHE_CLEANUP_INTERVAL_SECS`      | `600`                          | Background cleanup interval (seconds)                                                                                                   |
-| `--s3-enabled`                       | `S3_ENABLED`                       | `false`                        | Enable S3 as an image source                                                                                                            |
-| `--s3-bucket`                        | `S3_BUCKET`                        | -                              | S3 bucket name (required if S3 enabled)                                                                                                 |
-| `--s3-region`                        | `S3_REGION`                        | `us-east-1`                    | S3 region                                                                                                                               |
-| `--s3-access-key-id`                 | `S3_ACCESS_KEY_ID`                 | -                              | S3 access key ID (required if S3 enabled)                                                                                               |
-| `--s3-secret-access-key`             | `S3_SECRET_ACCESS_KEY`             | -                              | S3 secret access key (required if S3 enabled)                                                                                           |
-| `--s3-endpoint`                      | `S3_ENDPOINT`                      | -                              | Custom S3 endpoint URL (for Cloudflare R2, RustFS, etc.); omit for AWS                                                                  |
-| `--local-enabled`                    | `LOCAL_ENABLED`                    | `false`                        | Enable local filesystem as an image source                                                                                              |
-| `--local-base-dir`                   | `LOCAL_BASE_DIR`                   | -                              | Root directory for local file serving (required if local enabled)                                                                       |
-| `--ffmpeg-path`                      | `FFMPEG_PATH`                      | `ffmpeg`                       | Path to the ffmpeg binary                                                                                                               |
-| `--ffprobe-path`                     | `FFPROBE_PATH`                     | `ffprobe` (same dir as ffmpeg) | Path to the ffprobe binary                                                                                                              |
-| `--cors-allow-origin`                | `CORS_ALLOW_ORIGIN`                | `*`                            | Comma-separated allowed CORS origins; `*` = allow all; wildcards (`*.example.com`) match a single subdomain label                       |
-| `--cors-max-age-secs`                | `CORS_MAX_AGE_SECS`                | `600`                          | CORS preflight cache duration (seconds)                                                                                                 |
-| `--input-disallow-list`              | `INPUT_DISALLOW_LIST`              | -                              | Comma-separated input formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `pdf`, `psd`, `video`               |
-| `--output-disallow-list`             | `OUTPUT_DISALLOW_LIST`             | -                              | Comma-separated output formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `ico`                              |
-| `--transform-disallow-list`          | `TRANSFORM_DISALLOW_LIST`          | -                              | Comma-separated transforms to block: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur`, `watermark`, `gif_anim` |
-| `--url-aliases`                      | `URL_ALIASES`                      | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests         |
-| `--best-format-complexity-threshold` | `BEST_FORMAT_COMPLEXITY_THRESHOLD` | `5.5`                          | Sobel edge density threshold; images below this are treated as low-complexity (lossless candidates included)                            |
-| `--best-format-max-resolution`       | `BEST_FORMAT_MAX_RESOLUTION`       | -                              | When set, images with resolution (megapixels) above this skip the multi-encode trial and pick one format                                |
-| `--best-format-by-default`           | `BEST_FORMAT_BY_DEFAULT`           | `false`                        | When true and no format is specified, use best-format selection instead of returning source format                                      |
-| `--best-format-allow-skips`          | `BEST_FORMAT_ALLOW_SKIPS`          | `false`                        | When true, skip re-encoding if best format matches source format and no other transforms are applied                                    |
-| `--best-format-preferred-formats`    | `BEST_FORMAT_PREFERRED_FORMATS`    | `jpeg,webp,png`                | Comma-separated formats to trial; add `avif` or `jxl` for better compression at the cost of slower encoding                             |
+| Flag                                 | Env var                                         | Default                        | Description                                                                                                                             |
+| ------------------------------------ | ----------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `--port`, `-p`                       | `PREVIEWPROXY_PORT`                             | `8080`                         | Server port                                                                                                                             |
+| `--env`, `-E`                        | `PREVIEWPROXY_APP_ENV`                          | `development`                  | `development` or `production`                                                                                                           |
+| `--max-concurrent-requests`          | `PREVIEWPROXY_MAX_CONCURRENT_REQUESTS`          | `256`                          | Max number of concurrent requests before returning 503                                                                                  |
+| `--rust-log`                         | `RUST_LOG`                                      | `previewproxy=info,...`        | Log level filter                                                                                                                        |
+| `--hmac-key`, `-k`                   | `PREVIEWPROXY_HMAC_KEY`                         | -                              | HMAC signing key; omit to disable                                                                                                       |
+| `--allowed-hosts`, `-a`              | `PREVIEWPROXY_ALLOWED_HOSTS`                    | -                              | Comma-separated allowed domains; empty = allow all                                                                                      |
+| `--source-url-encryption-key`        | `PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY`        | -                              | Hex-encoded AES key for source URL encryption (32/48/64 hex chars = AES-128/192/256); omit to disable                                   |
+| `--fetch-timeout-secs`, `-t`         | `PREVIEWPROXY_FETCH_TIMEOUT_SECS`               | `10`                           | Upstream fetch timeout (seconds)                                                                                                        |
+| `--max-source-bytes`, `-s`           | `PREVIEWPROXY_MAX_SOURCE_BYTES`                 | `20971520`                     | Max source image size (bytes)                                                                                                           |
+| `--cache-memory-max-mb`              | `PREVIEWPROXY_CACHE_MEMORY_MAX_MB`              | `256`                          | L1 in-memory cache size (MB)                                                                                                            |
+| `--cache-memory-ttl-secs`            | `PREVIEWPROXY_CACHE_MEMORY_TTL_SECS`            | `3600`                         | L1 cache TTL (seconds)                                                                                                                  |
+| `--cache-dir`, `-D`                  | `PREVIEWPROXY_CACHE_DIR`                        | `/tmp/previewproxy`            | L2 disk cache directory                                                                                                                 |
+| `--cache-disk-ttl-secs`              | `PREVIEWPROXY_CACHE_DISK_TTL_SECS`              | `86400`                        | L2 cache TTL (seconds)                                                                                                                  |
+| `--cache-disk-max-mb`                | `PREVIEWPROXY_CACHE_DISK_MAX_MB`                | -                              | L2 disk cache size limit (MB); empty = unlimited                                                                                        |
+| `--cache-cleanup-interval-secs`      | `PREVIEWPROXY_CACHE_CLEANUP_INTERVAL_SECS`      | `600`                          | Background cleanup interval (seconds)                                                                                                   |
+| `--s3-enabled`                       | `PREVIEWPROXY_S3_ENABLED`                       | `false`                        | Enable S3 as an image source                                                                                                            |
+| `--s3-bucket`                        | `PREVIEWPROXY_S3_BUCKET`                        | -                              | S3 bucket name (required if S3 enabled)                                                                                                 |
+| `--s3-region`                        | `PREVIEWPROXY_S3_REGION`                        | `us-east-1`                    | S3 region                                                                                                                               |
+| `--s3-access-key-id`                 | `PREVIEWPROXY_S3_ACCESS_KEY_ID`                 | -                              | S3 access key ID (required if S3 enabled)                                                                                               |
+| `--s3-secret-access-key`             | `PREVIEWPROXY_S3_SECRET_ACCESS_KEY`             | -                              | S3 secret access key (required if S3 enabled)                                                                                           |
+| `--s3-endpoint`                      | `PREVIEWPROXY_S3_ENDPOINT`                      | -                              | Custom S3 endpoint URL (for Cloudflare R2, RustFS, etc.); omit for AWS                                                                  |
+| `--local-enabled`                    | `PREVIEWPROXY_LOCAL_ENABLED`                    | `false`                        | Enable local filesystem as an image source                                                                                              |
+| `--local-base-dir`                   | `PREVIEWPROXY_LOCAL_BASE_DIR`                   | -                              | Root directory for local file serving (required if local enabled)                                                                       |
+| `--ffmpeg-path`                      | `PREVIEWPROXY_FFMPEG_PATH`                      | `ffmpeg`                       | Path to the ffmpeg binary                                                                                                               |
+| `--ffprobe-path`                     | `PREVIEWPROXY_FFPROBE_PATH`                     | `ffprobe` (same dir as ffmpeg) | Path to the ffprobe binary                                                                                                              |
+| `--cors-allow-origin`                | `PREVIEWPROXY_CORS_ALLOW_ORIGIN`                | `*`                            | Comma-separated allowed CORS origins; `*` = allow all; wildcards (`*.example.com`) match a single subdomain label                       |
+| `--cors-max-age-secs`                | `PREVIEWPROXY_CORS_MAX_AGE_SECS`                | `600`                          | CORS preflight cache duration (seconds)                                                                                                 |
+| `--input-disallow-list`              | `PREVIEWPROXY_INPUT_DISALLOW_LIST`              | -                              | Comma-separated input formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `pdf`, `psd`, `video`               |
+| `--output-disallow-list`             | `PREVIEWPROXY_OUTPUT_DISALLOW_LIST`             | -                              | Comma-separated output formats to block: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `ico`                              |
+| `--transform-disallow-list`          | `PREVIEWPROXY_TRANSFORM_DISALLOW_LIST`          | -                              | Comma-separated transforms to block: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur`, `watermark`, `gif_anim` |
+| `--url-aliases`                      | `PREVIEWPROXY_URL_ALIASES`                      | -                              | Comma-separated alias definitions: `name=https://base.url,name2=https://other.url`; enables `name:/path` URL scheme in requests         |
+| `--best-format-complexity-threshold` | `PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD` | `5.5`                          | Sobel edge density threshold; images below this are treated as low-complexity (lossless candidates included)                            |
+| `--best-format-max-resolution`       | `PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION`       | -                              | When set, images with resolution (megapixels) above this skip the multi-encode trial and pick one format                                |
+| `--best-format-by-default`           | `PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT`           | `false`                        | When true and no format is specified, use best-format selection instead of returning source format                                      |
+| `--best-format-allow-skips`          | `PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS`          | `false`                        | When true, skip re-encoding if best format matches source format and no other transforms are applied                                    |
+| `--best-format-preferred-formats`    | `PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS`    | `jpeg,webp,png`                | Comma-separated formats to trial; add `avif` or `jxl` for better compression at the cost of slower encoding                             |
 
 ---
 
@@ -191,17 +191,17 @@ Configuration is read from environment variables (`.env` file) or CLI flags - CL
 
 ### Upstream Allowlist
 
-Set `ALLOWED_HOSTS` to a comma-separated list of trusted upstream domains. Wildcards match a single label:
+Set `PREVIEWPROXY_ALLOWED_HOSTS` to a comma-separated list of trusted upstream domains. Wildcards match a single label:
 
 ```ini
-ALLOWED_HOSTS=img.example.com,*.cdn.example.com
+PREVIEWPROXY_ALLOWED_HOSTS=img.example.com,*.cdn.example.com
 ```
 
 Leave empty to allow any host (open mode - use only in trusted environments).
 
 ### HMAC Signing
 
-Set `HMAC_KEY` to require signed requests. The signature is computed as:
+Set `PREVIEWPROXY_HMAC_KEY` to require signed requests. The signature is computed as:
 
 ```
 HMAC-SHA256(key, canonical_string)
@@ -211,10 +211,10 @@ where `canonical_string` is alphabetically sorted `key=value` pairs (excluding `
 
 ### CORS
 
-Set `CORS_ALLOW_ORIGIN` to restrict which browser origins may access the proxy. Wildcards match a single subdomain label:
+Set `PREVIEWPROXY_CORS_ALLOW_ORIGIN` to restrict which browser origins may access the proxy. Wildcards match a single subdomain label:
 
 ```ini
-CORS_ALLOW_ORIGIN=https://app.example.com,*.cdn.example.com
+PREVIEWPROXY_CORS_ALLOW_ORIGIN=https://app.example.com,*.cdn.example.com
 ```
 
 Leave as `*` (default) to allow any origin.
@@ -223,29 +223,29 @@ Leave as `*` (default) to allow any origin.
 
 Block specific input formats, output formats, or transforms via env vars. Each accepts a comma-separated list of tokens; unknown tokens are ignored with a warning.
 
-**Input formats** (`INPUT_DISALLOW_LIST`) - reject requests whose source image matches a blocked format (returns 400):
+**Input formats** (`PREVIEWPROXY_INPUT_DISALLOW_LIST`) - reject requests whose source image matches a blocked format (returns 400):
 
 ```ini
 # Block video thumbnails and PDF inputs
-INPUT_DISALLOW_LIST=video,pdf
+PREVIEWPROXY_INPUT_DISALLOW_LIST=video,pdf
 ```
 
 Tokens: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `pdf`, `psd`, `video`
 
-**Output formats** (`OUTPUT_DISALLOW_LIST`) - reject requests that would produce a blocked format (returns 400). Defaults to empty (allow all):
+**Output formats** (`PREVIEWPROXY_OUTPUT_DISALLOW_LIST`) - reject requests that would produce a blocked format (returns 400). Defaults to empty (allow all):
 
 ```ini
 # Allow all output formats
-OUTPUT_DISALLOW_LIST=
+PREVIEWPROXY_OUTPUT_DISALLOW_LIST=
 ```
 
 Tokens: `jpeg`, `png`, `gif`, `webp`, `avif`, `jxl`, `bmp`, `tiff`, `ico`
 
-**Transforms** (`TRANSFORM_DISALLOW_LIST`) - reject requests that apply a blocked transform (returns 400). Defaults to empty (allow all):
+**Transforms** (`PREVIEWPROXY_TRANSFORM_DISALLOW_LIST`) - reject requests that apply a blocked transform (returns 400). Defaults to empty (allow all):
 
 ```ini
 # Block watermarking and animated GIF processing only
-TRANSFORM_DISALLOW_LIST=watermark,gif_anim
+PREVIEWPROXY_TRANSFORM_DISALLOW_LIST=watermark,gif_anim
 ```
 
 Tokens: `resize`, `rotate`, `flip`, `grayscale`, `brightness`, `contrast`, `blur`, `watermark`, `gif_anim`
@@ -258,7 +258,7 @@ Private, loopback, link-local, and reserved IP ranges (RFC 1918, RFC 6598, IPv6 
 
 ### Source URL Encryption
 
-Set `SOURCE_URL_ENCRYPTION_KEY` to hide upstream origins from request logs and CDN traces. Encrypt URLs with AES-CBC before putting them in requests; previewproxy decrypts server-side before fetching.
+Set `PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY` to hide upstream origins from request logs and CDN traces. Encrypt URLs with AES-CBC before putting them in requests; previewproxy decrypts server-side before fetching.
 
 **Configure the key** (hex-encoded, 32/48/64 hex chars for AES-128/192/256):
 
@@ -266,7 +266,7 @@ Set `SOURCE_URL_ENCRYPTION_KEY` to hide upstream origins from request logs and C
 # Generate a key
 openssl rand -hex 32
 
-SOURCE_URL_ENCRYPTION_KEY=1eb5b0e971ad7f45324c1bb15c947cb207c43152fa5c6c7f35c4f36e0c18e0f1
+PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY=1eb5b0e971ad7f45324c1bb15c947cb207c43152fa5c6c7f35c4f36e0c18e0f1
 ```
 
 **Encrypt a URL** using the built-in CLI helper:
@@ -291,14 +291,14 @@ The `enc` query flag (any value, or just its presence) signals that `url` is enc
 
 > **Note:** The same source URL always produces the same encrypted blob (deterministic IV). This is intentional for CDN cache-hit compatibility. Rotate your key if you need to invalidate existing blobs.
 
-> **Recommended:** Use with `HMAC_KEY` signing to prevent padding oracle attacks on encrypted URLs.
+> **Recommended:** Use with `PREVIEWPROXY_HMAC_KEY` signing to prevent padding oracle attacks on encrypted URLs.
 
 ### URL Aliases
 
 Map short scheme names to real HTTP base URLs to avoid exposing domains in requests:
 
 ```ini
-URL_ALIASES=mycdn=https://img.example.com,cdn2=https://other.com
+PREVIEWPROXY_URL_ALIASES=mycdn=https://img.example.com,cdn2=https://other.com
 ```
 
 Then use the alias scheme in path-style or query-style requests:
@@ -311,7 +311,7 @@ GET /300x200,webp/mycdn:/photos/dog.jpg
 GET /proxy?url=mycdn:/photos/dog.jpg&w=300
 ```
 
-- Aliases bypass `ALLOWED_HOSTS` (operator-controlled, implicitly trusted)
+- Aliases bypass `PREVIEWPROXY_ALLOWED_HOSTS` (operator-controlled, implicitly trusted)
 - SSRF protection (private IP blocking) still applies
 - Base URL must be `http://` or `https://`
 

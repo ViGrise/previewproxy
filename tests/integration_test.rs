@@ -14,14 +14,14 @@ fn tiny_png() -> Vec<u8> {
 
 async fn build_test_app() -> axum::Router {
   unsafe {
-    std::env::set_var("PORT", "8081");
-    std::env::set_var("APP_ENV", "development");
-    std::env::set_var("CACHE_DIR", "/tmp/previewproxy-test");
-    std::env::set_var("CACHE_MEMORY_MAX_MB", "10");
-    std::env::remove_var("HMAC_KEY");
-    std::env::remove_var("ALLOWED_HOSTS");
-    std::env::remove_var("LOCAL_ENABLED");
-    std::env::remove_var("LOCAL_BASE_DIR");
+    std::env::set_var("PREVIEWPROXY_PORT", "8081");
+    std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+    std::env::set_var("PREVIEWPROXY_CACHE_DIR", "/tmp/previewproxy-test");
+    std::env::set_var("PREVIEWPROXY_CACHE_MEMORY_MAX_MB", "10");
+    std::env::remove_var("PREVIEWPROXY_HMAC_KEY");
+    std::env::remove_var("PREVIEWPROXY_ALLOWED_HOSTS");
+    std::env::remove_var("PREVIEWPROXY_LOCAL_ENABLED");
+    std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
   }
   let cfg = previewproxy::common::config::Configuration::new();
   let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
@@ -84,14 +84,14 @@ async fn test_proxy_query_style_cache_miss() {
 async fn test_blocked_host_returns_403() {
   let _guard = ENV_MUTEX.lock().unwrap();
   unsafe {
-    std::env::set_var("PORT", "8081");
-    std::env::set_var("APP_ENV", "development");
-    std::env::set_var("CACHE_DIR", "/tmp/previewproxy-test");
-    std::env::set_var("CACHE_MEMORY_MAX_MB", "10");
-    std::env::set_var("ALLOWED_HOSTS", "trusted.com");
-    std::env::remove_var("HMAC_KEY");
-    std::env::remove_var("LOCAL_ENABLED");
-    std::env::remove_var("LOCAL_BASE_DIR");
+    std::env::set_var("PREVIEWPROXY_PORT", "8081");
+    std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+    std::env::set_var("PREVIEWPROXY_CACHE_DIR", "/tmp/previewproxy-test");
+    std::env::set_var("PREVIEWPROXY_CACHE_MEMORY_MAX_MB", "10");
+    std::env::set_var("PREVIEWPROXY_ALLOWED_HOSTS", "trusted.com");
+    std::env::remove_var("PREVIEWPROXY_HMAC_KEY");
+    std::env::remove_var("PREVIEWPROXY_LOCAL_ENABLED");
+    std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
   }
   let cfg = previewproxy::common::config::Configuration::new();
   let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
@@ -114,14 +114,14 @@ async fn test_blocked_host_returns_403() {
 async fn test_bad_hmac_returns_403() {
   let _guard = ENV_MUTEX.lock().unwrap();
   unsafe {
-    std::env::set_var("PORT", "8081");
-    std::env::set_var("APP_ENV", "development");
-    std::env::set_var("CACHE_DIR", "/tmp/previewproxy-test");
-    std::env::set_var("CACHE_MEMORY_MAX_MB", "10");
-    std::env::set_var("HMAC_KEY", "secret");
-    std::env::remove_var("ALLOWED_HOSTS");
-    std::env::remove_var("LOCAL_ENABLED");
-    std::env::remove_var("LOCAL_BASE_DIR");
+    std::env::set_var("PREVIEWPROXY_PORT", "8081");
+    std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+    std::env::set_var("PREVIEWPROXY_CACHE_DIR", "/tmp/previewproxy-test");
+    std::env::set_var("PREVIEWPROXY_CACHE_MEMORY_MAX_MB", "10");
+    std::env::set_var("PREVIEWPROXY_HMAC_KEY", "secret");
+    std::env::remove_var("PREVIEWPROXY_ALLOWED_HOSTS");
+    std::env::remove_var("PREVIEWPROXY_LOCAL_ENABLED");
+    std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
   }
   let cfg = previewproxy::common::config::Configuration::new();
   let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
@@ -150,14 +150,17 @@ async fn test_local_source_passthrough() {
   std::fs::write(&img_path, tiny_png()).unwrap();
 
   unsafe {
-    std::env::set_var("PORT", "8081");
-    std::env::set_var("APP_ENV", "development");
-    std::env::set_var("CACHE_DIR", "/tmp/previewproxy-test-local-passthrough");
-    std::env::set_var("CACHE_MEMORY_MAX_MB", "10");
-    std::env::remove_var("HMAC_KEY");
-    std::env::remove_var("ALLOWED_HOSTS");
-    std::env::set_var("LOCAL_ENABLED", "true");
-    std::env::set_var("LOCAL_BASE_DIR", tmp.path().to_str().unwrap());
+    std::env::set_var("PREVIEWPROXY_PORT", "8081");
+    std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+    std::env::set_var(
+      "PREVIEWPROXY_CACHE_DIR",
+      "/tmp/previewproxy-test-local-passthrough",
+    );
+    std::env::set_var("PREVIEWPROXY_CACHE_MEMORY_MAX_MB", "10");
+    std::env::remove_var("PREVIEWPROXY_HMAC_KEY");
+    std::env::remove_var("PREVIEWPROXY_ALLOWED_HOSTS");
+    std::env::set_var("PREVIEWPROXY_LOCAL_ENABLED", "true");
+    std::env::set_var("PREVIEWPROXY_LOCAL_BASE_DIR", tmp.path().to_str().unwrap());
   }
 
   let cfg = previewproxy::common::config::Configuration::new();
@@ -187,14 +190,17 @@ async fn test_local_source_with_resize() {
   std::fs::write(&img_path, tiny_png()).unwrap();
 
   unsafe {
-    std::env::set_var("PORT", "8081");
-    std::env::set_var("APP_ENV", "development");
-    std::env::set_var("CACHE_DIR", "/tmp/previewproxy-test-local-resize");
-    std::env::set_var("CACHE_MEMORY_MAX_MB", "10");
-    std::env::remove_var("HMAC_KEY");
-    std::env::remove_var("ALLOWED_HOSTS");
-    std::env::set_var("LOCAL_ENABLED", "true");
-    std::env::set_var("LOCAL_BASE_DIR", tmp.path().to_str().unwrap());
+    std::env::set_var("PREVIEWPROXY_PORT", "8081");
+    std::env::set_var("PREVIEWPROXY_APP_ENV", "development");
+    std::env::set_var(
+      "PREVIEWPROXY_CACHE_DIR",
+      "/tmp/previewproxy-test-local-resize",
+    );
+    std::env::set_var("PREVIEWPROXY_CACHE_MEMORY_MAX_MB", "10");
+    std::env::remove_var("PREVIEWPROXY_HMAC_KEY");
+    std::env::remove_var("PREVIEWPROXY_ALLOWED_HOSTS");
+    std::env::set_var("PREVIEWPROXY_LOCAL_ENABLED", "true");
+    std::env::set_var("PREVIEWPROXY_LOCAL_BASE_DIR", tmp.path().to_str().unwrap());
   }
 
   let cfg = previewproxy::common::config::Configuration::new();
