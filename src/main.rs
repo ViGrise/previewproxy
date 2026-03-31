@@ -33,6 +33,18 @@ fn main() {
         }
       });
     }
+    Some(Commands::EncryptUrl { url, key }) => {
+      match previewproxy::modules::cli::subcommands::encrypt_url::run_encrypt_url(&url, &key) {
+        Ok(blob) => {
+          println!("{blob}");
+          eprintln!("/enc/{blob}");
+        }
+        Err(e) => {
+          eprintln!("encrypt-url failed: {e}");
+          std::process::exit(1);
+        }
+      }
+    }
     None | Some(Commands::Serve) => {
       previewproxy::common::config::telemetry::setup_tracing();
       let cfg = previewproxy::common::config::Configuration::new();
