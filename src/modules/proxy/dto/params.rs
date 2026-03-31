@@ -253,6 +253,24 @@ impl TransformParams {
       || self.wm.is_some()
       || self.gif_anim.is_some()
   }
+
+  /// Returns true if any transform other than format/quality/sig is set.
+  /// Used by allow-skips to determine if re-encoding is forced.
+  pub fn has_non_format_transforms(&self) -> bool {
+    self.w.is_some()
+      || self.h.is_some()
+      || self.fit.is_some()
+      || self.rotate.is_some()
+      || self.flip.is_some()
+      || self.blur.is_some()
+      || self.grayscale.is_some()
+      || self.seek.is_some()
+      || self.bright.is_some()
+      || self.contrast.is_some()
+      || self.wm.is_some()
+      || self.gif_anim.is_some()
+      || self.gif_af.is_some()
+  }
 }
 
 fn parse_gif_anim_value(s: &str) -> Result<GifAnimRange, ProxyError> {
@@ -787,6 +805,36 @@ mod tests {
     let (params, url) = TransformParams::from_path("s3:/images/photo.jpg").unwrap();
     assert_eq!(params.w, None);
     assert_eq!(url, "s3:/images/photo.jpg");
+  }
+
+  #[test]
+  fn test_has_transforms_best_format() {
+    let p = TransformParams {
+      format: Some("best".to_string()),
+      ..Default::default()
+    };
+    assert!(p.has_transforms(), "format=best must count as a transform");
+  }
+
+  #[test]
+  fn test_has_non_format_transforms_false_with_only_format() {
+    let p = TransformParams {
+      format: Some("best".to_string()),
+      q: Some(85),
+      sig: Some("abc".to_string()),
+      ..Default::default()
+    };
+    assert!(!p.has_non_format_transforms());
+  }
+
+  #[test]
+  fn test_has_non_format_transforms_true_with_resize() {
+    let p = TransformParams {
+      format: Some("best".to_string()),
+      w: Some(100),
+      ..Default::default()
+    };
+    assert!(p.has_non_format_transforms());
   }
 
   #[test]
