@@ -103,6 +103,7 @@ async fn handle_query_inner(
     .get("url")
     .cloned()
     .ok_or_else(|| ProxyError::InvalidParams("missing `url` query param".to_string()))?;
+  // Presence of `enc` key (any value) signals the URL is encrypted.
   let url = if query.contains_key("enc") {
     decrypt_url(state.cfg.source_url_encryption_key.as_ref(), &raw_url)?
   } else {
