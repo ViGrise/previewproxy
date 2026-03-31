@@ -207,7 +207,7 @@
   </g>
 
   <!-- ── WORDMARK ── -->
-  <text x="180" y="138" font-family="'Arial Narrow', Impact, Haettenschweiler, Arial, sans-serif" font-size="40"
+  <text x="180" y="138" font-family="'Arial Narrow', Impact, Haettenschweiler, Arial, sans-serif" font-size="36"
     font-weight="900" letter-spacing="4" text-anchor="middle" opacity="0">
     <animate attributeName="opacity" from="0" to="1" begin="1.0s" dur="0.5s" fill="freeze" />
     <tspan fill="#005ee2">PREVIEW</tspan><tspan fill="#888ea8">PROXY</tspan>
@@ -223,7 +223,7 @@
   <text x="180" y="162" font-family="'Courier New', monospace" font-size="9" font-weight="400" letter-spacing="3"
     fill="#888ea8" text-anchor="middle" opacity="0">
     <animate attributeName="opacity" from="0" to="1" begin="1.8s" dur="0.5s" fill="freeze" />
-    by ViGrise Technology
+    by ViGrise Platform
   </text>
 
 </svg>
