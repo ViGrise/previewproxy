@@ -59,6 +59,13 @@ pub struct Configuration {
   pub url_aliases: Option<HashMap<String, String>>,
   // Best format
   pub best_format: BestFormatConfig,
+  // Fallback image
+  pub fallback_image_data: Option<String>,
+  pub fallback_image_path: Option<String>,
+  pub fallback_image_url: Option<String>,
+  pub fallback_image_http_code: u16,
+  pub fallback_image_ttl: Option<u64>,
+  pub ttl: u64,
 }
 
 fn env_var_opt(name: &str) -> Option<String> {
@@ -340,6 +347,14 @@ impl Configuration {
           &std::env::var("PP_BEST_FORMAT_PREFERRED_FORMATS").unwrap_or_default(),
         ),
       },
+      fallback_image_data: env_var_opt("PP_FALLBACK_IMAGE_DATA"),
+      fallback_image_path: env_var_opt("PP_FALLBACK_IMAGE_PATH"),
+      fallback_image_url: env_var_opt("PP_FALLBACK_IMAGE_URL"),
+      fallback_image_http_code: env_var_u16("PP_FALLBACK_IMAGE_HTTP_CODE", 200),
+      fallback_image_ttl: env_var_opt("PP_FALLBACK_IMAGE_TTL")
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&v| v > 0),
+      ttl: env_var_u64("PP_TTL", 86400),
     });
     if cfg.hmac_key.is_none() {
       tracing::warn!("HMAC_KEY is not set - all requests are unauthenticated");
@@ -463,6 +478,12 @@ impl std::fmt::Debug for Configuration {
         }),
       )
       .field("best_format", &self.best_format)
+      .field("fallback_image_data", &self.fallback_image_data.as_ref().map(|_| "[set]"))
+      .field("fallback_image_path", &self.fallback_image_path)
+      .field("fallback_image_url", &self.fallback_image_url)
+      .field("fallback_image_http_code", &self.fallback_image_http_code)
+      .field("fallback_image_ttl", &self.fallback_image_ttl)
+      .field("ttl", &self.ttl)
       .finish()
   }
 }
@@ -797,5 +818,57 @@ mod tests {
     }));
     unsafe { std::env::remove_var("PP_SOURCE_URL_ENCRYPTION_KEY") };
     assert!(result.is_err(), "Expected panic for wrong key length");
+  }
+
+  #[test]
+  fn test_fallback_image_defaults() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PP_PORT", "8080");
+      std::env::set_var("PP_APP_ENV", "development");
+      std::env::remove_var("PP_FALLBACK_IMAGE_DATA");
+      std::env::remove_var("PP_FALLBACK_IMAGE_PATH");
+      std::env::remove_var("PP_FALLBACK_IMAGE_URL");
+      std::env::remove_var("PP_FALLBACK_IMAGE_HTTP_CODE");
+      std::env::remove_var("PP_FALLBACK_IMAGE_TTL");
+      std::env::remove_var("PP_TTL");
+    }
+    let cfg = super::Configuration::new();
+    assert!(cfg.fallback_image_data.is_none());
+    assert!(cfg.fallback_image_path.is_none());
+    assert!(cfg.fallback_image_url.is_none());
+    assert_eq!(cfg.fallback_image_http_code, 200);
+    assert!(cfg.fallback_image_ttl.is_none());
+    assert_eq!(cfg.ttl, 86400);
+  }
+
+  #[test]
+  fn test_fallback_image_from_env() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PP_PORT", "8080");
+      std::env::set_var("PP_APP_ENV", "development");
+      std::env::set_var("PP_FALLBACK_IMAGE_DATA", "aGVsbG8=");
+      std::env::set_var("PP_FALLBACK_IMAGE_PATH", "/tmp/fallback.png");
+      std::env::set_var("PP_FALLBACK_IMAGE_URL", "https://example.com/fallback.png");
+      std::env::set_var("PP_FALLBACK_IMAGE_HTTP_CODE", "0");
+      std::env::set_var("PP_FALLBACK_IMAGE_TTL", "300");
+      std::env::set_var("PP_TTL", "7200");
+    }
+    let cfg = super::Configuration::new();
+    unsafe {
+      std::env::remove_var("PP_FALLBACK_IMAGE_DATA");
+      std::env::remove_var("PP_FALLBACK_IMAGE_PATH");
+      std::env::remove_var("PP_FALLBACK_IMAGE_URL");
+      std::env::remove_var("PP_FALLBACK_IMAGE_HTTP_CODE");
+      std::env::remove_var("PP_FALLBACK_IMAGE_TTL");
+      std::env::remove_var("PP_TTL");
+    }
+    assert_eq!(cfg.fallback_image_data.as_deref(), Some("aGVsbG8="));
+    assert_eq!(cfg.fallback_image_path.as_deref(), Some("/tmp/fallback.png"));
+    assert_eq!(cfg.fallback_image_url.as_deref(), Some("https://example.com/fallback.png"));
+    assert_eq!(cfg.fallback_image_http_code, 0);
+    assert_eq!(cfg.fallback_image_ttl, Some(300));
+    assert_eq!(cfg.ttl, 7200);
   }
 }

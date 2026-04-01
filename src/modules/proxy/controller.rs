@@ -270,6 +270,12 @@ mod concurrency_tests {
       best_format: Default::default(),
       prometheus_bind: None,
       prometheus_namespace: String::new(),
+      fallback_image_data: None,
+      fallback_image_path: None,
+      fallback_image_url: None,
+      fallback_image_http_code: 200,
+      fallback_image_ttl: None,
+      ttl: 86400,
     });
     let http = Arc::new(
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
