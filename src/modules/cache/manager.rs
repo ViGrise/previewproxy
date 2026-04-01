@@ -4,8 +4,10 @@ use crate::modules::cache::{
   inflight::InflightMap,
   memory::{CacheEntry, MemoryCache},
 };
+use crate::modules::metrics::Metrics;
 use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Duration};
+use tracing::debug;
 
 /// Indicates which cache tier served the response.
 pub enum CacheHit {
@@ -26,10 +28,11 @@ pub struct CacheManager {
   l1: MemoryCache,
   pub l2: Arc<DiskCache>,
   inflight: InflightMap,
+  metrics: Arc<Metrics>,
 }
 
 impl CacheManager {
-  pub fn new(cfg: &Config) -> Arc<Self> {
+  pub fn new(cfg: &Config, metrics: Arc<Metrics>) -> Arc<Self> {
     let l1 = MemoryCache::new(
       cfg.cache_memory_max_mb,
       Duration::from_secs(cfg.cache_memory_ttl_secs),
@@ -43,27 +46,50 @@ impl CacheManager {
       l1,
       l2,
       inflight: InflightMap::new(),
+      metrics,
     })
   }
 
   pub fn preliminary_key(canonical: &str) -> String {
-    format!("{:x}", Sha256::digest(canonical.as_bytes()))
+    let key = format!("{:x}", Sha256::digest(canonical.as_bytes()));
+    debug!(key = %key, "computed preliminary cache key");
+    key
   }
 
+  #[tracing::instrument(skip(self), fields(key = %prelim_key))]
   pub async fn get(&self, prelim_key: &str) -> (Option<CacheEntry>, CacheHit) {
     if let Some(e) = self.l1.get(prelim_key).await {
+      debug!(key = %prelim_key, bytes = e.bytes.len(), "L1 cache hit");
+      self.metrics.cache_hits_total.with_label_values(&["memory"]).inc();
+      self.record_cache_sizes();
       return (Some(e), CacheHit::L1);
     }
     if let Ok(Some(e)) = self.l2.get(prelim_key).await {
+      debug!(key = %prelim_key, bytes = e.bytes.len(), "L2 cache hit - promoting to L1");
       self.l1.set(prelim_key.to_string(), e.clone()).await;
+      self.metrics.cache_hits_total.with_label_values(&["disk"]).inc();
+      self.record_cache_sizes();
       return (Some(e), CacheHit::L2);
     }
+    debug!(key = %prelim_key, "cache miss");
+    self.metrics.cache_misses_total.with_label_values(&["memory"]).inc();
+    self.metrics.cache_misses_total.with_label_values(&["disk"]).inc();
+    self.record_cache_sizes();
     (None, CacheHit::Miss)
   }
 
+  #[tracing::instrument(skip(self, entry), fields(key = %final_key, bytes = entry.bytes.len()))]
   pub async fn set(&self, final_key: &str, entry: CacheEntry) {
+    debug!(key = %final_key, bytes = entry.bytes.len(), "storing entry to L1 and L2");
     let _ = self.l2.set(final_key, entry.clone()).await;
     self.l1.set(final_key.to_string(), entry).await;
+    self.record_cache_sizes();
+  }
+
+  fn record_cache_sizes(&self) {
+    self.metrics.cache_memory_size_bytes.set(self.l1.size_bytes() as f64);
+    self.metrics.cache_disk_size_bytes.set(self.disk_total_bytes() as f64);
+    self.metrics.cache_entries.with_label_values(&["memory"]).set(self.l1.item_count() as i64);
   }
 
   pub fn inflight(&self) -> &InflightMap {

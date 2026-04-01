@@ -1,10 +1,10 @@
-use prometheus::{
+pub mod prometheus;
+
+use ::prometheus::{
   Gauge, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
   Opts, Registry,
 };
 use std::sync::Arc;
-
-pub mod prometheus;
 
 pub struct Metrics {
   pub registry: Registry,

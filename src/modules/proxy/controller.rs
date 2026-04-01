@@ -46,9 +46,15 @@ async fn handle_query(
   State(state): State<AppState>,
   Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+  let url = query.get("url").map(|s| s.as_str()).unwrap_or("");
   let permit = match state.concurrency.clone().try_acquire_owned() {
     Ok(p) => p,
     Err(_) => {
+      tracing::warn!(
+        style = "query",
+        url = url,
+        "503 Service Unavailable - concurrency limit reached"
+      );
       return (
         StatusCode::SERVICE_UNAVAILABLE,
         [(
@@ -78,6 +84,11 @@ async fn handle_path(
   let permit = match state.concurrency.clone().try_acquire_owned() {
     Ok(p) => p,
     Err(_) => {
+      tracing::warn!(
+        style = "path",
+        path = path.as_str(),
+        "503 Service Unavailable - concurrency limit reached"
+      );
       return (
         StatusCode::SERVICE_UNAVAILABLE,
         [(
@@ -142,8 +153,26 @@ async fn handle_path_inner(
 /// Streamed results get `X-Cache: MISS` and body is forwarded as a chunked stream.
 fn build_response(result: ProcessResult, cfg: &Config) -> Response {
   match result {
-    ProcessResult::Cached(entry, hit) => build_cached_response(entry, hit, cfg),
+    ProcessResult::Cached(entry, hit) => {
+      let x_cache = match hit {
+        crate::modules::cache::manager::CacheHit::L1 => "HIT-L1",
+        crate::modules::cache::manager::CacheHit::L2 => "HIT-L2",
+        crate::modules::cache::manager::CacheHit::Miss => "MISS",
+      };
+      tracing::info!(
+        x_cache = x_cache,
+        content_type = entry.content_type.as_str(),
+        bytes = entry.bytes.len(),
+        "response built from cache"
+      );
+      build_cached_response(entry, hit, cfg)
+    }
     ProcessResult::Stream { body, content_type } => {
+      tracing::info!(
+        x_cache = "MISS",
+        content_type = content_type.as_str(),
+        "response built as stream"
+      );
       let ct: axum::http::HeaderValue = content_type
         .parse()
         .unwrap_or_else(|_| "application/octet-stream".parse().unwrap());
@@ -226,17 +255,20 @@ mod concurrency_tests {
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
       best_format: Default::default(),
+      prometheus_bind: None,
+      prometheus_namespace: String::new(),
     });
     let http = Arc::new(
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
         .with_private_ip_check(false),
     );
     AppState {
-      cache: CacheManager::new(&cfg),
+      cache: CacheManager::new(&cfg, crate::modules::metrics::Metrics::new("")),
       fetcher: http.clone(),
       http_fetcher: http,
       concurrency: Arc::new(Semaphore::new(permits)),
       cfg,
+      metrics: crate::modules::metrics::Metrics::new(""),
     }
   }
 

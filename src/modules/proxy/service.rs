@@ -76,8 +76,18 @@ impl ProxyService {
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_default();
       if !self.allowlist.is_allowed(&image_host) {
+        tracing::info!(
+          url = image_url.as_str(),
+          host = image_host.as_str(),
+          "allowlist: host denied"
+        );
         return Err(ProxyError::HostNotAllowed);
       }
+      tracing::info!(
+        url = image_url.as_str(),
+        host = image_host.as_str(),
+        "allowlist: host allowed"
+      );
     }
 
     // 2. Allowlist check for watermark URL host (HTTP/HTTPS only)
@@ -99,11 +109,17 @@ impl ProxyService {
     // 4. HMAC check: if self.hmac_key is Some, verify params.sig against canonical_string
     if let Some(key) = &self.hmac_key {
       match &params.sig {
-        None => return Err(ProxyError::InvalidSignature),
-        Some(sig) if !hmac::verify(key, &canonical, sig) => {
+        None => {
+          tracing::info!(url = image_url.as_str(), "HMAC check: missing signature");
           return Err(ProxyError::InvalidSignature);
         }
-        _ => {}
+        Some(sig) if !hmac::verify(key, &canonical, sig) => {
+          tracing::info!(url = image_url.as_str(), "HMAC check: invalid signature");
+          return Err(ProxyError::InvalidSignature);
+        }
+        _ => {
+          tracing::info!(url = image_url.as_str(), "HMAC check: signature valid");
+        }
       }
     }
 
@@ -112,13 +128,21 @@ impl ProxyService {
 
     let (cached, hit) = self.cache.get(&prelim_key).await;
     if let Some(entry) = cached {
+      let tier = match hit {
+        CacheHit::L1 => "L1",
+        CacheHit::L2 => "L2",
+        CacheHit::Miss => "MISS",
+      };
+      tracing::info!(url = image_url.as_str(), cache_hit = tier, "cache hit");
       return Ok(ProcessResult::Cached(entry, hit));
     }
+    tracing::info!(url = image_url.as_str(), cache_hit = "MISS", "cache miss");
 
     // 6. Singleflight: check if already inflight, or start one
     if self.cache.inflight().is_inflight(&prelim_key)
       && let Some(result) = self.cache.inflight().wait(&prelim_key).await
     {
+      tracing::info!(url = image_url.as_str(), "joined inflight request");
       return result.map(|entry| ProcessResult::Cached(entry, CacheHit::Miss));
     }
     let guard = self.cache.inflight().start(prelim_key.clone());
@@ -233,9 +257,18 @@ impl ProxyService {
     // --- End streaming path (video/PDF fell through to here) ---
 
     // 7. Fetch (Issue 4 fix: pass original error to guard)
+    tracing::info!(url = image_url.as_str(), "fetch start");
     let fetch_result = self.fetcher.fetch(&image_url).await;
     let (mut src_bytes, mut src_ct) = match fetch_result {
-      Ok(v) => v,
+      Ok(v) => {
+        tracing::info!(
+          url = image_url.as_str(),
+          bytes = v.0.len(),
+          content_type = v.1.as_deref().unwrap_or(""),
+          "fetch complete"
+        );
+        v
+      }
       Err(e) => {
         guard.complete(Err(e.clone()));
         return Err(e);
@@ -314,8 +347,17 @@ impl ProxyService {
       src_ct.as_deref() == Some("application/pdf") || (!is_video && src_bytes.starts_with(b"%PDF"));
 
     // 10. If has_transforms or is_pdf or best_format: run_pipeline(); else resolve_content_type()
-    let pipeline_result = if params.has_transforms() || is_pdf || needs_best {
-      pipeline::run_pipeline(
+    let run_pipeline_flag = params.has_transforms() || is_pdf || needs_best;
+    if run_pipeline_flag {
+      tracing::info!(
+        url = image_url.as_str(),
+        bytes = src_bytes.len(),
+        content_type = src_ct.as_deref().unwrap_or(""),
+        "transform pipeline start"
+      );
+    }
+    let pipeline_result = if run_pipeline_flag {
+      let result = pipeline::run_pipeline(
         params,
         src_bytes,
         src_ct,
@@ -328,7 +370,16 @@ impl ProxyService {
       .map(|(bytes, ct)| CacheEntry {
         bytes,
         content_type: ct,
-      })
+      });
+      if let Ok(ref entry) = result {
+        tracing::info!(
+          url = image_url.as_str(),
+          bytes = entry.bytes.len(),
+          content_type = entry.content_type.as_str(),
+          "transform pipeline complete"
+        );
+      }
+      result
     } else {
       resolve_content_type(src_ct.as_deref(), &src_bytes).map(|ct| CacheEntry {
         bytes: src_bytes,
@@ -426,6 +477,8 @@ mod tests {
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
       best_format: Default::default(),
+      prometheus_bind: None,
+      prometheus_namespace: String::new(),
     })
   }
 
@@ -447,7 +500,7 @@ mod tests {
     let mut cfg = (*make_test_configuration()).clone();
     cfg.allowed_hosts = allowed_hosts.clone();
     let cfg = Arc::new(cfg);
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     ProxyService {
       fetcher,
       http_fetcher: Arc::new(
@@ -534,7 +587,7 @@ mod tests {
 
     let cfg = make_test_configuration();
     let fetcher: Arc<dyn Fetchable> = Arc::new(VideoMockFetcher);
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     let svc = ProxyService {
       fetcher,
       http_fetcher: Arc::new(
@@ -590,7 +643,7 @@ mod tests {
 
     let cfg = make_test_configuration();
     let fetcher: Arc<dyn Fetchable> = Arc::new(VideoMockFetcher2);
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     let mut input_disallow = std::collections::HashSet::new();
     input_disallow.insert(DisallowedInput::Video);
     let svc = ProxyService {
@@ -677,12 +730,14 @@ mod streaming_tests {
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
       best_format: Default::default(),
+      prometheus_bind: None,
+      prometheus_namespace: String::new(),
     });
     let http = Arc::new(
       HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
         .with_private_ip_check(false),
     );
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     let svc = ProxyService {
       fetcher: http.clone(),
       http_fetcher: http,

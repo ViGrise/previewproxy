@@ -24,8 +24,8 @@ async fn build_test_app() -> axum::Router {
     std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
   }
   let cfg = previewproxy::common::config::Configuration::new();
-  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
-  previewproxy::app::router(cfg, cache).await
+  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg, previewproxy::modules::metrics::Metrics::new(""));
+  previewproxy::app::router(cfg, cache, previewproxy::modules::metrics::Metrics::new("")).await
 }
 
 #[tokio::test]
@@ -94,8 +94,8 @@ async fn test_blocked_host_returns_403() {
     std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
   }
   let cfg = previewproxy::common::config::Configuration::new();
-  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
-  let app = previewproxy::app::router(cfg, cache).await;
+  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg, previewproxy::modules::metrics::Metrics::new(""));
+  let app = previewproxy::app::router(cfg, cache, previewproxy::modules::metrics::Metrics::new("")).await;
 
   let url = format!("/proxy?url={}", urlencoding::encode("https://http.cat/200"));
   let resp = app
@@ -124,8 +124,8 @@ async fn test_bad_hmac_returns_403() {
     std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
   }
   let cfg = previewproxy::common::config::Configuration::new();
-  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
-  let app = previewproxy::app::router(cfg, cache).await;
+  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg, previewproxy::modules::metrics::Metrics::new(""));
+  let app = previewproxy::app::router(cfg, cache, previewproxy::modules::metrics::Metrics::new("")).await;
 
   let image_url = urlencoding::encode("https://http.cat/200");
   let url = format!("/proxy?url={}&sig=badsig", image_url);
@@ -164,8 +164,8 @@ async fn test_local_source_passthrough() {
   }
 
   let cfg = previewproxy::common::config::Configuration::new();
-  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
-  let app = previewproxy::app::router(cfg, cache).await;
+  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg, previewproxy::modules::metrics::Metrics::new(""));
+  let app = previewproxy::app::router(cfg, cache, previewproxy::modules::metrics::Metrics::new("")).await;
 
   // local:/test.png - relative path joined to LOCAL_BASE_DIR
   let resp = app
@@ -204,8 +204,8 @@ async fn test_local_source_with_resize() {
   }
 
   let cfg = previewproxy::common::config::Configuration::new();
-  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg);
-  let app = previewproxy::app::router(cfg, cache).await;
+  let cache = previewproxy::modules::cache::manager::CacheManager::new(&cfg, previewproxy::modules::metrics::Metrics::new(""));
+  let app = previewproxy::app::router(cfg, cache, previewproxy::modules::metrics::Metrics::new("")).await;
 
   // 1x1,webp/local:/test.png - resize to 1x1 and convert to webp
   let resp = app
