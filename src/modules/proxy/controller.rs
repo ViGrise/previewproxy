@@ -667,4 +667,84 @@ mod concurrency_tests {
       Some("MISS")
     );
   }
+
+  #[tokio::test]
+  async fn test_fallback_ttl_uses_fallback_image_ttl_when_set() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+      .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==")
+      .unwrap();
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(png_bytes),
+      content_type: "image/png".to_string(),
+    }));
+
+    let mut cfg = (*make_state(1).cfg).clone();
+    cfg.fallback_image_ttl = Some(300);
+    cfg.ttl = 86400;
+    let state = AppState {
+      cfg: std::sync::Arc::new(cfg),
+      fallback,
+      ..make_state(256)
+    };
+    let app = crate::modules::router(state);
+
+    let url = format!("/proxy?url={}", urlencoding::encode(&server.uri()));
+    let req = axum::http::Request::builder()
+      .uri(&url)
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+      resp.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+      Some("public, max-age=300")
+    );
+  }
+
+  #[tokio::test]
+  async fn test_fallback_ttl_falls_back_to_pp_ttl() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+      .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==")
+      .unwrap();
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(png_bytes),
+      content_type: "image/png".to_string(),
+    }));
+
+    let mut cfg = (*make_state(1).cfg).clone();
+    cfg.fallback_image_ttl = None;
+    cfg.ttl = 1234;
+    let state = AppState {
+      cfg: std::sync::Arc::new(cfg),
+      fallback,
+      ..make_state(256)
+    };
+    let app = crate::modules::router(state);
+
+    let url = format!("/proxy?url={}", urlencoding::encode(&server.uri()));
+    let req = axum::http::Request::builder()
+      .uri(&url)
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+      resp.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+      Some("public, max-age=1234")
+    );
+  }
 }
