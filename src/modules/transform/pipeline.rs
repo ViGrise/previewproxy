@@ -6,26 +6,55 @@ use std::{io::Cursor, sync::Arc};
 use tokio::task::spawn_blocking;
 
 /// Validate and resolve content-type. Returns the resolved MIME string or ProxyError.
+#[tracing::instrument(skip(bytes), fields(input_bytes = bytes.len()))]
 pub fn resolve_content_type(header: Option<&str>, bytes: &[u8]) -> Result<String, ProxyError> {
   match header {
-    Some(ct) if ct.starts_with("image/") => Ok(ct.to_string()),
-    Some("application/pdf") => Ok("application/pdf".to_string()),
+    Some(ct) if ct.starts_with("image/") => {
+      tracing::debug!(
+        content_type = ct,
+        "resolve_content_type: resolved from header"
+      );
+      Ok(ct.to_string())
+    }
+    Some("application/pdf") => {
+      tracing::debug!(
+        content_type = "application/pdf",
+        "resolve_content_type: resolved from header"
+      );
+      Ok("application/pdf".to_string())
+    }
     Some(_) => Err(ProxyError::NotAnImage),
     None => {
       if let Some(kind) = infer::get(bytes)
         && (kind.mime_type().starts_with("image/") || kind.mime_type() == "application/pdf")
       {
+        tracing::debug!(
+          content_type = kind.mime_type(),
+          "resolve_content_type: inferred from bytes"
+        );
         return Ok(kind.mime_type().to_string());
       }
       if bytes.starts_with(b"%PDF") {
+        tracing::debug!(
+          content_type = "application/pdf",
+          "resolve_content_type: detected PDF magic bytes"
+        );
         return Ok("application/pdf".to_string());
       }
       if bytes.starts_with(&[0xFF, 0x0A])
         || bytes.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20])
       {
+        tracing::debug!(
+          content_type = "image/jxl",
+          "resolve_content_type: detected JXL magic bytes"
+        );
         return Ok("image/jxl".to_string());
       }
       if bytes.starts_with(b"8BPS") {
+        tracing::debug!(
+          content_type = "image/vnd.adobe.photoshop",
+          "resolve_content_type: detected PSD magic bytes"
+        );
         return Ok("image/vnd.adobe.photoshop".to_string());
       }
       Err(ProxyError::NotAnImage)
@@ -50,6 +79,7 @@ fn load_image(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
 ///
 /// CPU-bound ops (decode, transform, encode) are run on a blocking thread via
 /// `spawn_blocking` to avoid stalling the async runtime.
+#[tracing::instrument(skip(src_bytes, fetcher, output_disallow, transform_disallow, best_format_cfg), fields(input_bytes = src_bytes.len()))]
 pub async fn run_pipeline(
   params: TransformParams,
   src_bytes: Vec<u8>,
@@ -61,6 +91,10 @@ pub async fn run_pipeline(
 ) -> Result<(Vec<u8>, String), ProxyError> {
   // 1. Validate content-type
   let resolved_ct = resolve_content_type(src_content_type.as_deref(), &src_bytes)?;
+  tracing::debug!(
+    content_type = resolved_ct.as_str(),
+    "pipeline: content type resolved"
+  );
   let is_document = resolved_ct == "application/pdf";
 
   // Resolve effective format: "best" if explicitly requested or by-default with no format
@@ -135,6 +169,7 @@ pub async fn run_pipeline(
   // 2. Passthrough: no transforms → return as-is with resolved content-type
   let is_best = effective_fmt == "best";
   if !params.has_transforms() && !is_best && !is_document {
+    tracing::debug!("pipeline: passthrough - no transforms requested");
     return Ok((src_bytes, resolved_ct));
   }
 
@@ -157,7 +192,12 @@ pub async fn run_pipeline(
   let params_clone = params.clone();
 
   // 4a. Animated GIF path
+  tracing::debug!(
+    effective_fmt = effective_fmt_clone.as_str(),
+    "pipeline: entering transform steps"
+  );
   if params_clone.gif_anim.is_some() && resolved_ct == "image/gif" {
+    tracing::debug!("pipeline: step gif_anim");
     let range = params_clone.gif_anim.clone().unwrap();
     let all_frames = params_clone.gif_af.unwrap_or(false);
     let result = spawn_blocking(move || {
@@ -190,39 +230,47 @@ pub async fn run_pipeline(
     let mut img = crate::modules::transform::ops::decode::dispatch(&resolved_ct_clone, &src_bytes)?;
 
     // Resize
+    tracing::debug!("pipeline: step resize");
     let fit = params_clone.fit.as_deref().unwrap_or("contain");
     img = ops::resize::resize(img, params_clone.w, params_clone.h, fit)?;
 
     // Rotate
+    tracing::debug!("pipeline: step rotate");
     img = ops::rotate::rotate(img, params_clone.rotate)?;
 
     // Flip
+    tracing::debug!("pipeline: step flip");
     img = ops::rotate::flip(img, params_clone.flip.as_deref())?;
 
     // Brightness / contrast
     let bright = params_clone.bright.unwrap_or(0);
     let contrast = params_clone.contrast.unwrap_or(0);
     if bright != 0 || contrast != 0 {
+      tracing::debug!("pipeline: step brightness_contrast");
       img = ops::color::brightness_contrast(img, bright, contrast)?;
     }
 
     // Grayscale
     if params_clone.grayscale == Some(true) {
+      tracing::debug!("pipeline: step grayscale");
       img = ops::color::to_grayscale(img)?;
     }
 
     // Blur
     if let Some(sigma) = params_clone.blur {
+      tracing::debug!("pipeline: step blur");
       img = ops::blur::gaussian_blur(img, sigma)?;
     }
 
     // Watermark
     if let Some(wm_data) = wm_bytes {
+      tracing::debug!("pipeline: step watermark");
       let wm_img = load_image(&wm_data)?;
       img = ops::watermark::apply_watermark_sync(img, wm_img)?;
     }
 
     // Encode
+    tracing::debug!("pipeline: step encode");
     let quality = params_clone.q.unwrap_or(85);
     let result = if effective_fmt_clone == "best" {
       ops::best_format::select_best_format(

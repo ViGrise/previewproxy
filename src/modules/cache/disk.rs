@@ -9,6 +9,7 @@ use std::{
   },
 };
 use tokio::fs;
+use tracing::debug;
 
 #[derive(Serialize, Deserialize)]
 struct Meta {
@@ -61,6 +62,7 @@ impl DiskCache {
     self.shard_dir(key).join(format!("{key}.meta"))
   }
 
+  #[tracing::instrument(skip(self), fields(key = %key))]
   pub async fn get(&self, key: &str) -> Result<Option<CacheEntry>> {
     let meta_path = self.meta_path(key);
     if !meta_path.exists() {
@@ -76,17 +78,21 @@ impl DiskCache {
       age >= self.ttl_secs
     };
     if expired {
+      debug!(key = %key, age_secs = age, ttl_secs = self.ttl_secs, path = %meta_path.display(), "disk cache TTL expired - removing entry");
       let _ = fs::remove_file(self.bin_path(key)).await;
       let _ = fs::remove_file(&meta_path).await;
       return Ok(None);
     }
-    let bytes = fs::read(self.bin_path(key)).await?;
+    let bin_path = self.bin_path(key);
+    let bytes = fs::read(&bin_path).await?;
+    debug!(key = %key, bytes = bytes.len(), path = %bin_path.display(), "disk cache read hit");
     Ok(Some(CacheEntry {
       bytes,
       content_type: meta.content_type,
     }))
   }
 
+  #[tracing::instrument(skip(self, entry), fields(key = %key, bytes = entry.bytes.len()))]
   pub async fn set(&self, key: &str, entry: CacheEntry) -> Result<()> {
     let shard = self.shard_dir(key);
     fs::create_dir_all(&shard).await?;
@@ -94,11 +100,14 @@ impl DiskCache {
       content_type: entry.content_type,
       created_at: now_unix(),
     };
+    let bin_path = self.bin_path(key);
+    debug!(key = %key, bytes = entry.bytes.len(), path = %bin_path.display(), "writing entry to disk cache");
     fs::write(self.meta_path(key), serde_json::to_vec(&meta)?).await?;
-    fs::write(self.bin_path(key), &entry.bytes).await?;
+    fs::write(&bin_path, &entry.bytes).await?;
     Ok(())
   }
 
+  #[tracing::instrument(skip(self))]
   pub async fn cleanup(&self) -> Result<u64> {
     let now = now_unix();
     let mut total: u64 = 0;
@@ -135,6 +144,7 @@ impl DiskCache {
             age >= self.ttl_secs
           };
           if stale {
+            debug!(key = %key, age_secs = age, ttl_secs = self.ttl_secs, "disk cleanup: evicting TTL-expired entry");
             let _ = fs::remove_file(&bin).await;
             let _ = fs::remove_file(f.path()).await;
           } else {
@@ -156,6 +166,7 @@ impl DiskCache {
         if total <= max {
           break;
         }
+        debug!(path = %bin.display(), size_bytes = size, total_bytes = total, max_bytes = max, "disk cleanup: evicting oldest entry to enforce size limit");
         let _ = fs::remove_file(&bin).await;
         let _ = fs::remove_file(&meta).await;
         total = total.saturating_sub(size);

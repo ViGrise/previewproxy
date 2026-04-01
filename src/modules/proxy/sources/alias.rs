@@ -31,6 +31,11 @@ impl AliasSource {
 impl Fetchable for AliasSource {
   async fn fetch(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
     let resolved = self.resolve(url)?;
+    tracing::debug!(
+      alias_url = url,
+      resolved_url = resolved.as_str(),
+      "alias resolved"
+    );
     self.http.fetch(&resolved).await
   }
 }

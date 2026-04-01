@@ -1,6 +1,7 @@
 use crate::common::errors::ProxyError;
 use image::DynamicImage;
 
+#[tracing::instrument(skip(img))]
 pub fn rotate(img: DynamicImage, degrees: Option<u32>) -> Result<DynamicImage, ProxyError> {
   let result = match degrees {
     Some(90) => img.rotate90(),
@@ -8,15 +9,18 @@ pub fn rotate(img: DynamicImage, degrees: Option<u32>) -> Result<DynamicImage, P
     Some(270) => img.rotate270(),
     _ => img,
   };
+  tracing::debug!(angle = ?degrees, "rotate: op applied");
   Ok(result)
 }
 
+#[tracing::instrument(skip(img))]
 pub fn flip(img: DynamicImage, direction: Option<&str>) -> Result<DynamicImage, ProxyError> {
   let result = match direction {
     Some("h") => img.fliph(),
     Some("v") => img.flipv(),
     _ => img,
   };
+  tracing::debug!(direction = ?direction, "flip: op applied");
   Ok(result)
 }
 

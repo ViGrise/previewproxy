@@ -39,6 +39,7 @@ impl Fetchable for S3Source {
   async fn fetch(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
     // Strip "s3:/" prefix to get S3 key
     let key = url.strip_prefix("s3:/").unwrap_or(url);
+    tracing::debug!(bucket = self.bucket.as_str(), key = key, "S3 fetch start");
 
     let resp = self
       .client
@@ -83,6 +84,13 @@ impl Fetchable for S3Source {
       return Err(ProxyError::SourceTooLarge);
     }
 
+    tracing::debug!(
+      bucket = self.bucket.as_str(),
+      key = key,
+      bytes = bytes.len(),
+      content_type = content_type.as_deref().unwrap_or(""),
+      "S3 fetch complete"
+    );
     Ok((bytes.to_vec(), content_type))
   }
 }

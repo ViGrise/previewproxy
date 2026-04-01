@@ -3,6 +3,7 @@ use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pk
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use thiserror::Error;
+use tracing::debug;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum EncryptionError {
@@ -72,30 +73,47 @@ fn aes_decrypt(key: &[u8], iv: &[u8; 16], data: &[u8]) -> Result<Vec<u8>, Encryp
 /// CDN cache-hit compatibility. The trade-off is that an observer can tell when two blobs
 /// represent the same underlying URL. Acceptable for this use case; rotate keys if confidentiality
 /// of URL equality is required.
+#[tracing::instrument(skip(key, plaintext), fields(key_len = key.len()))]
 pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, EncryptionError> {
+  debug!("encrypt called");
   validate_key(key)?;
   let iv = derive_iv(key, plaintext);
   let ciphertext = aes_encrypt(key, &iv, plaintext.as_bytes());
   let mut combined = Vec::with_capacity(16 + ciphertext.len());
   combined.extend_from_slice(&iv);
   combined.extend_from_slice(&ciphertext);
-  Ok(URL_SAFE_NO_PAD.encode(combined))
+  let result = Ok(URL_SAFE_NO_PAD.encode(combined));
+  debug!(result = "ok", "encrypt completed");
+  result
 }
 
+#[tracing::instrument(skip(key, blob), fields(key_len = key.len()))]
 pub fn decrypt(key: &[u8], blob: &str) -> Result<String, EncryptionError> {
+  debug!("decrypt called");
   validate_key(key)?;
   let raw = URL_SAFE_NO_PAD
     .decode(blob)
     .map_err(|_| EncryptionError::Base64)?;
   if raw.len() < 16 {
+    debug!(result = "err", error = "blob_too_short", "decrypt failed");
     return Err(EncryptionError::BlobTooShort);
   }
   let (iv_bytes, ciphertext) = raw.split_at(16);
   let iv: [u8; 16] = iv_bytes
     .try_into()
     .expect("split_at(16) guarantees 16 bytes");
-  let plaintext_bytes = aes_decrypt(key, &iv, ciphertext)?;
-  String::from_utf8(plaintext_bytes).map_err(|_| EncryptionError::InvalidUtf8)
+  let plaintext_bytes = aes_decrypt(key, &iv, ciphertext).map_err(|e| {
+    debug!(result = "err", error = %e, "decrypt failed");
+    e
+  })?;
+  let outcome = String::from_utf8(plaintext_bytes).map_err(|_| {
+    debug!(result = "err", error = "invalid_utf8", "decrypt failed");
+    EncryptionError::InvalidUtf8
+  });
+  if outcome.is_ok() {
+    debug!(result = "ok", "decrypt completed");
+  }
+  outcome
 }
 
 #[cfg(test)]

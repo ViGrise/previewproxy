@@ -1,6 +1,7 @@
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tracing::debug;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheEntry {
@@ -23,16 +24,29 @@ impl MemoryCache {
     Self { inner: cache }
   }
 
+  #[tracing::instrument(skip(self), fields(key = %key))]
   pub async fn get(&self, key: &str) -> Option<CacheEntry> {
-    self.inner.get(key).await
+    let result = self.inner.get(key).await;
+    if result.is_none() {
+      debug!(key = %key, "memory cache miss");
+    }
+    result
   }
 
+  #[tracing::instrument(skip(self, entry), fields(key = %key, bytes = entry.bytes.len()))]
   pub async fn set(&self, key: String, entry: CacheEntry) {
+    let bytes = entry.bytes.len();
+    let item_count = self.inner.entry_count();
+    debug!(key = %key, bytes, item_count, "inserting entry into memory cache");
     self.inner.insert(key, entry).await;
   }
 
   pub fn item_count(&self) -> u64 {
     self.inner.entry_count()
+  }
+
+  pub fn size_bytes(&self) -> u64 {
+    self.inner.weighted_size()
   }
 }
 

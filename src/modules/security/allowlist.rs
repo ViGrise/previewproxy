@@ -1,5 +1,6 @@
 use ipnet::IpNet;
 use std::net::IpAddr;
+use tracing::debug;
 
 /// Host-based allowlist for outbound fetch requests.
 ///
@@ -18,11 +19,15 @@ impl Allowlist {
     Self { entries, open }
   }
 
+  #[tracing::instrument(skip(self), fields(host = %host))]
   pub fn is_allowed(&self, host: &str) -> bool {
     if self.open {
+      debug!(host = %host, result = "allowed", reason = "open_mode", "allowlist check");
       return true;
     }
-    self.entries.iter().any(|entry| matches_host(entry, host))
+    let allowed = self.entries.iter().any(|entry| matches_host(entry, host));
+    debug!(host = %host, result = if allowed { "allowed" } else { "denied" }, "allowlist check");
+    allowed
   }
 }
 
@@ -55,13 +60,16 @@ static PRIVATE_RANGES: &[&str] = &[
 
 /// Returns true if `ip` falls within any RFC-1918, loopback, link-local, or
 /// other non-routable range. Used to block SSRF attempts.
+#[tracing::instrument]
 pub fn is_private_ip(ip: IpAddr) -> bool {
-  PRIVATE_RANGES.iter().any(|range| {
+  let result = PRIVATE_RANGES.iter().any(|range| {
     range
       .parse::<IpNet>()
       .map(|net| net.contains(&ip))
       .unwrap_or(false)
-  })
+  });
+  debug!(ip = %ip, is_private = result, "private ip check");
+  result
 }
 
 #[cfg(test)]

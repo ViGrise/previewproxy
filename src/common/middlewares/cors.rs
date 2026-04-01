@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use axum::http::HeaderValue;
 use tower_http::cors::{AllowHeaders, AllowOrigin, Any, CorsLayer};
+use tracing::debug;
 
 fn matches_origin(pattern: &str, origin: &str) -> bool {
   // Extract host (and optional port) from origin URL, e.g. "https://sub.example.com:8080"
@@ -25,6 +26,7 @@ fn matches_origin(pattern: &str, origin: &str) -> bool {
 }
 
 /// Layer that applies the Cors middleware which adds headers for CORS.
+#[tracing::instrument(skip(allow_origin))]
 pub fn cors_layer(allow_origin: &[String], max_age_secs: u64) -> CorsLayer {
   let origin = if allow_origin.iter().any(|o| o == "*") {
     AllowOrigin::any()
@@ -42,9 +44,11 @@ pub fn cors_layer(allow_origin: &[String], max_age_secs: u64) -> CorsLayer {
     )
   };
 
-  CorsLayer::new()
+  let layer = CorsLayer::new()
     .allow_origin(origin)
     .allow_methods(Any)
     .allow_headers(AllowHeaders::mirror_request())
-    .max_age(Duration::from_secs(max_age_secs))
+    .max_age(Duration::from_secs(max_age_secs));
+  debug!(max_age_secs, "CORS headers applied");
+  layer
 }

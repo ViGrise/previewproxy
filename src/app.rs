@@ -14,7 +14,11 @@ use tokio::sync::Semaphore;
 /// Middleware is applied bottom-to-top (request_id wraps everything,
 /// normalize_path is innermost). Sources are selected via [`SourceRouter`]:
 /// S3 and local filesystem are only initialized when enabled in config.
-pub async fn router(cfg: Config, cache: Arc<CacheManager>) -> Router {
+pub async fn router(
+  cfg: Config,
+  cache: Arc<CacheManager>,
+  metrics: Arc<crate::modules::metrics::Metrics>,
+) -> Router {
   let allowlist = Arc::new(Allowlist::new(cfg.allowed_hosts.clone()));
   let check_private = cfg.env == Environment::Production;
   let http = Arc::new(
@@ -70,6 +74,7 @@ pub async fn router(cfg: Config, cache: Arc<CacheManager>) -> Router {
     fetcher,
     http_fetcher,
     concurrency,
+    metrics,
   };
 
   let trace_layer = telemetry::trace_layer();

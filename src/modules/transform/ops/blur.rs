@@ -1,11 +1,14 @@
 use crate::common::errors::ProxyError;
 use image::DynamicImage;
 
+#[tracing::instrument(skip(img))]
 pub fn gaussian_blur(img: DynamicImage, sigma: f32) -> Result<DynamicImage, ProxyError> {
   if sigma <= 0.0 {
     return Ok(img);
   }
-  Ok(img.fast_blur(sigma))
+  let result = img.fast_blur(sigma);
+  tracing::debug!(sigma, "blur: op applied");
+  Ok(result)
 }
 
 #[cfg(test)]

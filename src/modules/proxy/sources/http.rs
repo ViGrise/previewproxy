@@ -64,6 +64,7 @@ impl HttpFetcher {
     }
   }
 
+  #[tracing::instrument(skip(self), fields(url))]
   async fn fetch_url(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
     if self.check_private_ips {
       let parsed =
@@ -112,6 +113,12 @@ impl HttpFetcher {
       .map(|s| s.split(';').next().unwrap_or(s).trim().to_string());
 
     let bytes = self.read_body_limited(resp).await?;
+    tracing::debug!(
+      url = url,
+      bytes = bytes.len(),
+      content_type = content_type.as_deref().unwrap_or(""),
+      "HTTP fetch complete"
+    );
     Ok((bytes, content_type))
   }
 
@@ -130,6 +137,7 @@ impl HttpFetcher {
 
   /// Returns the reqwest::Response after header checks, without reading the body.
   /// Caller is responsible for reading or streaming the body.
+  #[tracing::instrument(skip(self), fields(url))]
   pub async fn fetch_streaming(&self, url: &str) -> Result<reqwest::Response, ProxyError> {
     if self.check_private_ips {
       let parsed =
@@ -171,6 +179,11 @@ impl HttpFetcher {
       )));
     }
 
+    tracing::debug!(
+      url = url,
+      status = resp.status().as_u16(),
+      "HTTP streaming fetch response received"
+    );
     Ok(resp)
   }
 }

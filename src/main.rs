@@ -50,7 +50,19 @@ fn main() {
       let cfg = previewproxy::common::config::Configuration::new();
       rt.block_on(async {
         use previewproxy::modules;
-        let cache = modules::cache::manager::CacheManager::new(&cfg);
+
+        let metrics = modules::metrics::Metrics::new(&cfg.prometheus_namespace);
+
+        // Set startup gauges
+        metrics.workers.set(cfg.max_concurrent_requests as i64);
+        metrics
+          .buffer_default_size_bytes
+          .set(cfg.max_source_bytes as f64);
+        metrics
+          .buffer_max_size_bytes
+          .set(cfg.max_source_bytes as f64);
+
+        let cache = modules::cache::manager::CacheManager::new(&cfg, metrics.clone());
         let cache_clone = cache.clone();
         let interval = cfg.cache_cleanup_interval_secs;
         tokio::spawn(async move {
@@ -60,7 +72,23 @@ fn main() {
             cache_clone.run_cleanup().await;
           }
         });
-        let app = previewproxy::app::router(cfg.clone(), cache).await;
+
+        // Spawn Prometheus metrics server if configured
+        if let Some(bind) = cfg.prometheus_bind {
+          let metrics_router = modules::metrics::prometheus::router(metrics.clone());
+          let metrics_listener = tokio::net::TcpListener::bind(bind)
+            .await
+            .unwrap_or_else(|e| {
+              tracing::error!("Failed to bind Prometheus listener on {bind}: {e}");
+              std::process::exit(1);
+            });
+          tracing::info!("Prometheus metrics listening on http://{bind}/metrics");
+          tokio::spawn(async move {
+            axum::serve(metrics_listener, metrics_router).await.unwrap();
+          });
+        }
+
+        let app = previewproxy::app::router(cfg.clone(), cache, metrics).await;
         let listener = tokio::net::TcpListener::bind(cfg.listen_address)
           .await
           .unwrap();

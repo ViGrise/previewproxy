@@ -3,6 +3,7 @@ use bytemuck::cast_slice;
 use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
 
+#[tracing::instrument(skip(img))]
 pub fn encode(
   img: DynamicImage,
   format: &str,
@@ -25,7 +26,13 @@ pub fn encode(
         .with_speed(6)
         .encode_rgba(buf)
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;
-      return Ok((encoded.avif_file.to_vec(), "image/avif".to_string()));
+      let avif_bytes = encoded.avif_file.to_vec();
+      tracing::debug!(
+        format = "avif",
+        output_bytes = avif_bytes.len(),
+        "encode: op applied"
+      );
+      return Ok((avif_bytes, "image/avif".to_string()));
     }
     "jxl" => {
       use jpegxl_rs::{encode::EncoderFrame, encoder_builder};
@@ -39,7 +46,13 @@ pub fn encode(
       let result = encoder
         .encode_frame::<u8, u8>(&frame, width, height)
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;
-      return Ok((result.to_vec(), "image/jxl".to_string()));
+      let jxl_bytes = result.to_vec();
+      tracing::debug!(
+        format = "jxl",
+        output_bytes = jxl_bytes.len(),
+        "encode: op applied"
+      );
+      return Ok((jxl_bytes, "image/jxl".to_string()));
     }
     _ => (ImageFormat::Jpeg, "image/jpeg"),
   };
@@ -58,7 +71,9 @@ pub fn encode(
       .map_err(|e| ProxyError::InternalError(e.to_string()))?;
   }
 
-  Ok((buf.into_inner(), content_type.to_string()))
+  let out = buf.into_inner();
+  tracing::debug!(format, output_bytes = out.len(), "encode: op applied");
+  Ok((out, content_type.to_string()))
 }
 
 #[cfg(test)]

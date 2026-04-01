@@ -5,6 +5,7 @@ use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::{AnimationDecoder, DynamicImage, Frame};
 use std::io::Cursor;
 
+#[tracing::instrument(skip(src_bytes, wm_img), fields(input_bytes = src_bytes.len()))]
 pub fn run(
   src_bytes: &[u8],
   range: &GifAnimRange,
@@ -20,6 +21,7 @@ pub fn run(
     .collect_frames()
     .map_err(|e| ProxyError::InternalError(e.to_string()))?;
   let total = frames.len();
+  tracing::debug!(frame_count = total, "gif_anim: decoded frames");
 
   // Resolve in-range bounds as (start, end) inclusive - all variants produce contiguous ranges
   let (range_start, range_end) = match range {
@@ -113,6 +115,7 @@ pub fn run(
   }
 
   // Encode
+  let out_frames_count = out_frames.len();
   let mut buf = Cursor::new(Vec::new());
   {
     let mut encoder = GifEncoder::new(&mut buf);
@@ -126,7 +129,13 @@ pub fn run(
     }
   }
 
-  Ok(buf.into_inner())
+  let out = buf.into_inner();
+  tracing::debug!(
+    frame_count = total,
+    output_frames = out_frames_count,
+    "gif_anim: op applied"
+  );
+  Ok(out)
 }
 
 #[cfg(test)]

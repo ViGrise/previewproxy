@@ -23,6 +23,7 @@ impl LocalSource {
 impl Fetchable for LocalSource {
   async fn fetch(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
     let path_str = url.strip_prefix("local:/").unwrap_or(url);
+    tracing::debug!(path = path_str, "local fetch start");
     let path = PathBuf::from(path_str);
     let resolved = self.base_dir.join(&path);
 
@@ -54,6 +55,7 @@ impl Fetchable for LocalSource {
       .await
       .map_err(|e| ProxyError::InternalError(e.to_string()))?;
 
+    tracing::debug!(path = path_str, bytes = bytes.len(), "local fetch complete");
     Ok((bytes, None))
   }
 }

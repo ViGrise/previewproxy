@@ -35,9 +35,11 @@ impl SourceRouter {
 impl Fetchable for SourceRouter {
   async fn fetch(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
     if url.starts_with("http://") || url.starts_with("https://") {
+      tracing::debug!(url = url, source = "http", "routing to HTTP source");
       return self.http.fetch(url).await;
     }
     if url.starts_with("s3:/") {
+      tracing::debug!(url = url, source = "s3", "routing to S3 source");
       return match &self.s3 {
         Some(s3) => s3.fetch(url).await,
         None => Err(ProxyError::InvalidParams(
@@ -46,6 +48,7 @@ impl Fetchable for SourceRouter {
       };
     }
     if url.starts_with("local:/") {
+      tracing::debug!(url = url, source = "local", "routing to local source");
       return match &self.local {
         Some(local) => local.fetch(url).await,
         None => Err(ProxyError::InvalidParams(
@@ -54,9 +57,11 @@ impl Fetchable for SourceRouter {
       };
     }
     if url.contains("://") {
+      tracing::debug!(url = url, "unsupported scheme");
       return Err(ProxyError::InvalidParams("unsupported scheme".to_string()));
     }
     if url.contains(":/") {
+      tracing::debug!(url = url, source = "alias", "routing to alias source");
       return match &self.alias {
         Some(alias) => alias.fetch(url).await,
         None => Err(ProxyError::InvalidParams(
@@ -64,6 +69,7 @@ impl Fetchable for SourceRouter {
         )),
       };
     }
+    tracing::debug!(url = url, "unrecognized URL format");
     Err(ProxyError::InvalidParams(
       "unrecognized URL format".to_string(),
     ))

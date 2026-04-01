@@ -1,9 +1,13 @@
 use crate::modules::security::encryption;
 use anyhow::{Result, anyhow};
+use tracing::debug;
 
+#[tracing::instrument(skip(key_hex))]
 pub fn run_encrypt_url(url: &str, key_hex: &str) -> Result<String> {
   let key = hex::decode(key_hex).map_err(|e| anyhow!("invalid hex key: {e}"))?;
-  encryption::encrypt(&key, url).map_err(|e| anyhow!("{e}"))
+  let result = encryption::encrypt(&key, url).map_err(|e| anyhow!("{e}"))?;
+  debug!("URL encrypted");
+  Ok(result)
 }
 
 #[cfg(test)]

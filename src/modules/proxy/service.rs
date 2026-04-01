@@ -10,6 +10,7 @@ use crate::modules::security::{allowlist::Allowlist, hmac};
 use crate::modules::transform::pipeline::{self, resolve_content_type};
 use bytes::Bytes;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{OwnedSemaphorePermit, mpsc};
 use url::Url;
 
@@ -28,6 +29,7 @@ pub struct ProxyService {
   output_disallow: std::collections::HashSet<crate::common::config::DisallowedOutput>,
   transform_disallow: std::collections::HashSet<crate::common::config::DisallowedTransform>,
   best_format: crate::common::config::BestFormatConfig,
+  metrics: Arc<crate::modules::metrics::Metrics>,
 }
 
 impl ProxyService {
@@ -46,6 +48,7 @@ impl ProxyService {
       output_disallow: state.cfg.output_disallow.clone(),
       transform_disallow: state.cfg.transform_disallow.clone(),
       best_format: state.cfg.best_format.clone(),
+      metrics: state.metrics.clone(),
     }
   }
 
@@ -68,7 +71,35 @@ impl ProxyService {
     params: TransformParams,
     image_url: String,
     permit: OwnedSemaphorePermit,
+    queued_at: Instant,
   ) -> Result<ProcessResult, ProxyError> {
+    self.metrics.requests_total.inc();
+    self.metrics.requests_in_progress.inc();
+    self.metrics.update_utilization();
+
+    struct RequestGuard {
+      metrics: Arc<crate::modules::metrics::Metrics>,
+      start: Instant,
+    }
+    impl Drop for RequestGuard {
+      fn drop(&mut self) {
+        self.metrics.requests_in_progress.dec();
+        self.metrics.update_utilization();
+        self.metrics
+          .request_duration_seconds
+          .observe(self.start.elapsed().as_secs_f64());
+      }
+    }
+    let _request_guard = RequestGuard {
+      metrics: self.metrics.clone(),
+      start: Instant::now(),
+    };
+
+    self.metrics
+      .request_span_duration_seconds
+      .with_label_values(&["queue"])
+      .observe(queued_at.elapsed().as_secs_f64());
+
     // 1. Allowlist check for image URL host (HTTP/HTTPS only)
     if image_url.starts_with("http://") || image_url.starts_with("https://") {
       let image_host = Url::parse(&image_url)
@@ -76,8 +107,18 @@ impl ProxyService {
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_default();
       if !self.allowlist.is_allowed(&image_host) {
+        tracing::info!(
+          url = image_url.as_str(),
+          host = image_host.as_str(),
+          "allowlist: host denied"
+        );
         return Err(ProxyError::HostNotAllowed);
       }
+      tracing::info!(
+        url = image_url.as_str(),
+        host = image_host.as_str(),
+        "allowlist: host allowed"
+      );
     }
 
     // 2. Allowlist check for watermark URL host (HTTP/HTTPS only)
@@ -99,11 +140,17 @@ impl ProxyService {
     // 4. HMAC check: if self.hmac_key is Some, verify params.sig against canonical_string
     if let Some(key) = &self.hmac_key {
       match &params.sig {
-        None => return Err(ProxyError::InvalidSignature),
-        Some(sig) if !hmac::verify(key, &canonical, sig) => {
+        None => {
+          tracing::info!(url = image_url.as_str(), "HMAC check: missing signature");
           return Err(ProxyError::InvalidSignature);
         }
-        _ => {}
+        Some(sig) if !hmac::verify(key, &canonical, sig) => {
+          tracing::info!(url = image_url.as_str(), "HMAC check: invalid signature");
+          return Err(ProxyError::InvalidSignature);
+        }
+        _ => {
+          tracing::info!(url = image_url.as_str(), "HMAC check: signature valid");
+        }
       }
     }
 
@@ -112,13 +159,21 @@ impl ProxyService {
 
     let (cached, hit) = self.cache.get(&prelim_key).await;
     if let Some(entry) = cached {
+      let tier = match hit {
+        CacheHit::L1 => "L1",
+        CacheHit::L2 => "L2",
+        CacheHit::Miss => "MISS",
+      };
+      tracing::info!(url = image_url.as_str(), cache_hit = tier, "cache hit");
       return Ok(ProcessResult::Cached(entry, hit));
     }
+    tracing::info!(url = image_url.as_str(), cache_hit = "MISS", "cache miss");
 
     // 6. Singleflight: check if already inflight, or start one
     if self.cache.inflight().is_inflight(&prelim_key)
       && let Some(result) = self.cache.inflight().wait(&prelim_key).await
     {
+      tracing::info!(url = image_url.as_str(), "joined inflight request");
       return result.map(|entry| ProcessResult::Cached(entry, CacheHit::Miss));
     }
     let guard = self.cache.inflight().start(prelim_key.clone());
@@ -132,6 +187,8 @@ impl ProxyService {
         Ok(r) => r,
         Err(e) => {
           guard.complete(Err(e.clone()));
+          let error_type = if matches!(e, ProxyError::UpstreamTimeout) { "timeout" } else { "downloading" };
+          self.metrics.errors_total.with_label_values(&[error_type]).inc();
           return Err(e);
         }
       };
@@ -233,14 +290,31 @@ impl ProxyService {
     // --- End streaming path (video/PDF fell through to here) ---
 
     // 7. Fetch (Issue 4 fix: pass original error to guard)
+    tracing::info!(url = image_url.as_str(), "fetch start");
+    let download_start = Instant::now();
     let fetch_result = self.fetcher.fetch(&image_url).await;
+    self.metrics
+      .request_span_duration_seconds
+      .with_label_values(&["downloading"])
+      .observe(download_start.elapsed().as_secs_f64());
     let (mut src_bytes, mut src_ct) = match fetch_result {
-      Ok(v) => v,
+      Ok(v) => {
+        tracing::info!(
+          url = image_url.as_str(),
+          bytes = v.0.len(),
+          content_type = v.1.as_deref().unwrap_or(""),
+          "fetch complete"
+        );
+        v
+      }
       Err(e) => {
         guard.complete(Err(e.clone()));
+        let error_type = if matches!(e, ProxyError::UpstreamTimeout) { "timeout" } else { "downloading" };
+        self.metrics.errors_total.with_label_values(&[error_type]).inc();
         return Err(e);
       }
     };
+    self.metrics.buffer_size_bytes.observe(src_bytes.len() as f64);
 
     // 8. Video interception (extract first/seeked frame and continue as PNG)
     let is_video = src_ct
@@ -288,11 +362,13 @@ impl ProxyService {
           }
           Err(e) => {
             guard.complete(Err(e.clone()));
+            self.metrics.errors_total.with_label_values(&["processing"]).inc();
             return Err(e);
           }
         },
         Err(e) => {
           guard.complete(Err(e.clone()));
+          self.metrics.errors_total.with_label_values(&["processing"]).inc();
           return Err(e);
         }
       }
@@ -314,8 +390,19 @@ impl ProxyService {
       src_ct.as_deref() == Some("application/pdf") || (!is_video && src_bytes.starts_with(b"%PDF"));
 
     // 10. If has_transforms or is_pdf or best_format: run_pipeline(); else resolve_content_type()
-    let pipeline_result = if params.has_transforms() || is_pdf || needs_best {
-      pipeline::run_pipeline(
+    let run_pipeline_flag = params.has_transforms() || is_pdf || needs_best;
+    if run_pipeline_flag {
+      tracing::info!(
+        url = image_url.as_str(),
+        bytes = src_bytes.len(),
+        content_type = src_ct.as_deref().unwrap_or(""),
+        "transform pipeline start"
+      );
+    }
+    let pipeline_result = if run_pipeline_flag {
+      self.metrics.images_in_progress.inc();
+      let transform_start = Instant::now();
+      let result = pipeline::run_pipeline(
         params,
         src_bytes,
         src_ct,
@@ -328,7 +415,21 @@ impl ProxyService {
       .map(|(bytes, ct)| CacheEntry {
         bytes,
         content_type: ct,
-      })
+      });
+      self.metrics.images_in_progress.dec();
+      self.metrics
+        .request_span_duration_seconds
+        .with_label_values(&["processing"])
+        .observe(transform_start.elapsed().as_secs_f64());
+      if let Ok(ref entry) = result {
+        tracing::info!(
+          url = image_url.as_str(),
+          bytes = entry.bytes.len(),
+          content_type = entry.content_type.as_str(),
+          "transform pipeline complete"
+        );
+      }
+      result
     } else {
       resolve_content_type(src_ct.as_deref(), &src_bytes).map(|ct| CacheEntry {
         bytes: src_bytes,
@@ -340,6 +441,7 @@ impl ProxyService {
       Ok(e) => e,
       Err(e) => {
         guard.complete(Err(e.clone()));
+        self.metrics.errors_total.with_label_values(&["processing"]).inc();
         return Err(e);
       }
     };
@@ -426,6 +528,8 @@ mod tests {
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
       best_format: Default::default(),
+      prometheus_bind: None,
+      prometheus_namespace: String::new(),
     })
   }
 
@@ -447,7 +551,7 @@ mod tests {
     let mut cfg = (*make_test_configuration()).clone();
     cfg.allowed_hosts = allowed_hosts.clone();
     let cfg = Arc::new(cfg);
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     ProxyService {
       fetcher,
       http_fetcher: Arc::new(
@@ -468,6 +572,7 @@ mod tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       best_format: crate::common::config::BestFormatConfig::default(),
+      metrics: crate::modules::metrics::Metrics::new(""),
     }
   }
 
@@ -483,6 +588,7 @@ mod tests {
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
+        std::time::Instant::now(),
       )
       .await;
     // Should NOT be HostNotAllowed - it should reach the fetcher and return the mock error.
@@ -510,6 +616,7 @@ mod tests {
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
+        std::time::Instant::now(),
       )
       .await;
     assert!(
@@ -534,7 +641,7 @@ mod tests {
 
     let cfg = make_test_configuration();
     let fetcher: Arc<dyn Fetchable> = Arc::new(VideoMockFetcher);
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     let svc = ProxyService {
       fetcher,
       http_fetcher: Arc::new(
@@ -555,6 +662,7 @@ mod tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       best_format: crate::common::config::BestFormatConfig::default(),
+      metrics: crate::modules::metrics::Metrics::new(""),
     };
 
     let params = TransformParams::default();
@@ -565,6 +673,7 @@ mod tests {
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
+        std::time::Instant::now(),
       )
       .await;
     assert!(
@@ -590,7 +699,7 @@ mod tests {
 
     let cfg = make_test_configuration();
     let fetcher: Arc<dyn Fetchable> = Arc::new(VideoMockFetcher2);
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     let mut input_disallow = std::collections::HashSet::new();
     input_disallow.insert(DisallowedInput::Video);
     let svc = ProxyService {
@@ -613,6 +722,7 @@ mod tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       best_format: crate::common::config::BestFormatConfig::default(),
+      metrics: crate::modules::metrics::Metrics::new(""),
     };
     let params = TransformParams::default();
     let result = svc
@@ -622,6 +732,7 @@ mod tests {
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
+        std::time::Instant::now(),
       )
       .await;
     assert!(
@@ -677,12 +788,14 @@ mod streaming_tests {
       transform_disallow: std::collections::HashSet::new(),
       url_aliases: None,
       best_format: Default::default(),
+      prometheus_bind: None,
+      prometheus_namespace: String::new(),
     });
     let http = Arc::new(
       HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
         .with_private_ip_check(false),
     );
-    let cache = CacheManager::new(&cfg);
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
     let svc = ProxyService {
       fetcher: http.clone(),
       http_fetcher: http,
@@ -696,6 +809,7 @@ mod streaming_tests {
       output_disallow: std::collections::HashSet::new(),
       transform_disallow: std::collections::HashSet::new(),
       best_format: crate::common::config::BestFormatConfig::default(),
+      metrics: crate::modules::metrics::Metrics::new(""),
     };
     (svc, cache)
   }
@@ -717,7 +831,7 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit())
+      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
       .await
       .unwrap();
     assert!(matches!(result, ProcessResult::Stream { .. }));
@@ -736,7 +850,7 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit())
+      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
       .await;
     assert!(matches!(result, Err(ProxyError::NotAnImage)));
   }
@@ -757,7 +871,7 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit())
+      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
       .await;
     assert!(
       matches!(result, Err(ProxyError::VideoDecodeError)),
@@ -779,7 +893,7 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit())
+      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
       .await;
     assert!(matches!(result, Err(ProxyError::PdfRenderError)));
   }
@@ -798,7 +912,7 @@ mod streaming_tests {
     let (svc, cache) = make_svc(1_000_000);
     let url = server.uri();
     let result = svc
-      .process(TransformParams::default(), url.clone(), permit())
+      .process(TransformParams::default(), url.clone(), permit(), std::time::Instant::now())
       .await
       .unwrap();
     if let ProcessResult::Stream { body, .. } = result {
@@ -822,6 +936,7 @@ mod streaming_tests {
         TransformParams::default(),
         "s3:/some/key.jpg".to_string(),
         permit(),
+        std::time::Instant::now(),
       )
       .await;
     assert!(!matches!(result, Ok(ProcessResult::Stream { .. })));
@@ -841,7 +956,7 @@ mod streaming_tests {
     let (svc, cache) = make_svc(1_000_000);
     let url = server.uri();
     let result = svc
-      .process(TransformParams::default(), url.clone(), permit())
+      .process(TransformParams::default(), url.clone(), permit(), std::time::Instant::now())
       .await
       .unwrap();
     if let ProcessResult::Stream { mut body, .. } = result {
@@ -880,6 +995,7 @@ mod streaming_tests {
         TransformParams::default(),
         format!("{}/img.png", server.uri()),
         permit(),
+        std::time::Instant::now(),
       )
       .await;
 
@@ -903,7 +1019,7 @@ mod streaming_tests {
     let (svc, cache) = make_svc(50);
     let url = server.uri();
     let result = svc
-      .process(TransformParams::default(), url.clone(), permit())
+      .process(TransformParams::default(), url.clone(), permit(), std::time::Instant::now())
       .await
       .unwrap();
     if let ProcessResult::Stream { mut body, .. } = result {

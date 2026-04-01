@@ -76,6 +76,7 @@ aws-config = "1"
 urlencoding = "2"
 url = "2"
 semver = "1"
+prometheus = { version = "0.14", features = ["process"] }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 jpegxl-rs = { version = "0.14", features = ["vendored"] }

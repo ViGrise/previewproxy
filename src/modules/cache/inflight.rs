@@ -3,6 +3,7 @@ use crate::modules::cache::memory::CacheEntry;
 use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
+use tracing::debug;
 
 type InflightResult = Option<Result<CacheEntry, String>>;
 
@@ -41,7 +42,9 @@ impl InflightMap {
   }
 
   /// Insert a new inflight entry and return a guard. Caller is responsible for calling complete().
+  #[tracing::instrument(skip(self), fields(key = %key))]
   pub fn start(&self, key: String) -> InflightGuard {
+    debug!(key = %key, "new inflight entry started");
     let entry = Arc::new(InflightEntry {
       result: Mutex::new(None),
       notify: Notify::new(),
@@ -62,8 +65,10 @@ impl InflightMap {
 
   /// Wait for an in-flight entry. Returns None if not found (race at boundary).
   /// Returns Some(result) after the first caller completes.
+  #[tracing::instrument(skip(self), fields(key = %key))]
   pub async fn wait(&self, key: &str) -> Option<Result<CacheEntry, ProxyError>> {
     let entry = self.map.get(key)?.clone();
+    debug!(key = %key, "request coalesced - waiting for existing inflight entry");
     entry.notify.notified().await;
     let guard = entry.result.lock().await;
     guard
@@ -77,11 +82,13 @@ impl InflightGuard {
   /// Protocol: store result → remove from map → notify waiters.
   pub fn complete(mut self, result: Result<CacheEntry, ProxyError>) {
     self.completed = true;
+    let succeeded = result.is_ok();
     let serialized: Result<CacheEntry, String> = result.map_err(|e| e.to_string());
     let entry = self.entry.clone();
     let key = self.key.clone();
     let map = self.map.clone();
     tokio::spawn(async move {
+      debug!(key = %key, succeeded, "inflight entry completed - notifying waiters");
       *entry.result.lock().await = Some(serialized);
       map.remove(&key);
       entry.notify.notify_waiters();
