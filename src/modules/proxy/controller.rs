@@ -20,6 +20,7 @@ use axum::{
 };
 use futures::StreamExt;
 use std::collections::HashMap;
+use std::time::Instant;
 use tokio::sync::OwnedSemaphorePermit;
 
 fn decrypt_url(key: Option<&Vec<u8>>, blob: &str) -> Result<String, ProxyError> {
@@ -47,6 +48,7 @@ async fn handle_query(
   Query(query): Query<HashMap<String, String>>,
 ) -> Response {
   let url = query.get("url").map(|s| s.as_str()).unwrap_or("");
+  let queued_at = Instant::now();
   let permit = match state.concurrency.clone().try_acquire_owned() {
     Ok(p) => p,
     Err(_) => {
@@ -55,7 +57,7 @@ async fn handle_query(
         url = url,
         "503 Service Unavailable - concurrency limit reached"
       );
-      return (
+      let resp = (
         StatusCode::SERVICE_UNAVAILABLE,
         [(
           axum::http::header::HeaderName::from_static("retry-after"),
@@ -64,11 +66,15 @@ async fn handle_query(
         axum::body::Body::empty(),
       )
         .into_response();
+      state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+      return resp;
     }
   };
-  handle_query_inner(state, query, permit)
+  let resp = handle_query_inner(state.clone(), query, permit, queued_at)
     .await
-    .unwrap_or_else(|e| e.into_response())
+    .unwrap_or_else(|e| e.into_response());
+  state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+  resp
 }
 
 /// Handles `GET /<params>/<image_url>` requests.
@@ -81,6 +87,7 @@ async fn handle_path(
   Path(path): Path<String>,
   Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+  let queued_at = Instant::now();
   let permit = match state.concurrency.clone().try_acquire_owned() {
     Ok(p) => p,
     Err(_) => {
@@ -89,7 +96,7 @@ async fn handle_path(
         path = path.as_str(),
         "503 Service Unavailable - concurrency limit reached"
       );
-      return (
+      let resp = (
         StatusCode::SERVICE_UNAVAILABLE,
         [(
           axum::http::header::HeaderName::from_static("retry-after"),
@@ -98,17 +105,22 @@ async fn handle_path(
         axum::body::Body::empty(),
       )
         .into_response();
+      state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+      return resp;
     }
   };
-  handle_path_inner(state, path, query, permit)
+  let resp = handle_path_inner(state.clone(), path, query, permit, queued_at)
     .await
-    .unwrap_or_else(|e| e.into_response())
+    .unwrap_or_else(|e| e.into_response());
+  state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+  resp
 }
 
 async fn handle_query_inner(
   state: AppState,
   query: HashMap<String, String>,
   permit: OwnedSemaphorePermit,
+  queued_at: Instant,
 ) -> Result<Response, ProxyError> {
   let raw_url = query
     .get("url")
@@ -122,7 +134,7 @@ async fn handle_query_inner(
   };
   let params = from_query(&query)?;
   let service = ProxyService::new(&state);
-  let result = service.process(params, url, permit).await?;
+  let result = service.process(params, url, permit, queued_at).await?;
   Ok(build_response(result, &state.cfg))
 }
 
@@ -131,6 +143,7 @@ async fn handle_path_inner(
   path: String,
   query: HashMap<String, String>,
   permit: OwnedSemaphorePermit,
+  queued_at: Instant,
 ) -> Result<Response, ProxyError> {
   let (mut params, raw_url) = TransformParams::from_path(&path)?;
   let url = if raw_url.starts_with("enc/") {
@@ -144,7 +157,7 @@ async fn handle_path_inner(
     params.merge_from(query_params);
   }
   let svc = ProxyService::new(&state);
-  let result = svc.process(params, url, permit).await?;
+  let result = svc.process(params, url, permit, queued_at).await?;
   Ok(build_response(result, &state.cfg))
 }
 
