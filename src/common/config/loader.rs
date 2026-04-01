@@ -48,6 +48,9 @@ pub struct Configuration {
   pub cors_max_age_secs: u64,
   // Concurrency
   pub max_concurrent_requests: usize,
+  // Prometheus
+  pub prometheus_bind: Option<SocketAddr>,
+  pub prometheus_namespace: String,
   // Disallow lists
   pub input_disallow: HashSet<DisallowedInput>,
   pub output_disallow: HashSet<DisallowedOutput>,
@@ -305,6 +308,13 @@ impl Configuration {
         .collect(),
       cors_max_age_secs: env_var_u64("PREVIEWPROXY_CORS_MAX_AGE_SECS", 600),
       max_concurrent_requests,
+      prometheus_bind: env_var_opt("PP_PROMETHEUS_BIND").and_then(|v| {
+        v.parse::<SocketAddr>().ok().or_else(|| {
+          // support bare ":9464" form
+          format!("0.0.0.0{v}").parse().ok()
+        })
+      }),
+      prometheus_namespace: env_var_opt("PP_PROMETHEUS_NAMESPACE").unwrap_or_default(),
       input_disallow: parse_input_disallow(
         &std::env::var("PREVIEWPROXY_INPUT_DISALLOW_LIST").unwrap_or_default(),
       ),
