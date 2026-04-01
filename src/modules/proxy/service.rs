@@ -187,7 +187,8 @@ impl ProxyService {
         Ok(r) => r,
         Err(e) => {
           guard.complete(Err(e.clone()));
-          self.metrics.errors_total.with_label_values(&["downloading"]).inc();
+          let error_type = if matches!(e, ProxyError::UpstreamTimeout) { "timeout" } else { "downloading" };
+          self.metrics.errors_total.with_label_values(&[error_type]).inc();
           return Err(e);
         }
       };
@@ -308,7 +309,8 @@ impl ProxyService {
       }
       Err(e) => {
         guard.complete(Err(e.clone()));
-        self.metrics.errors_total.with_label_values(&["downloading"]).inc();
+        let error_type = if matches!(e, ProxyError::UpstreamTimeout) { "timeout" } else { "downloading" };
+        self.metrics.errors_total.with_label_values(&[error_type]).inc();
         return Err(e);
       }
     };
