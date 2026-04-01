@@ -3,6 +3,7 @@ use crate::common::errors::ProxyError;
 use crate::modules::AppState;
 use crate::modules::cache::manager::CacheHit;
 use crate::modules::cache::memory::CacheEntry;
+use crate::modules::proxy::fallback::FallbackImage;
 use crate::modules::proxy::{
   dto::{
     ProcessResult,
@@ -66,14 +67,22 @@ async fn handle_query(
         axum::body::Body::empty(),
       )
         .into_response();
-      state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+      state
+        .metrics
+        .status_codes_total
+        .with_label_values(&[resp.status().as_str()])
+        .inc();
       return resp;
     }
   };
   let resp = handle_query_inner(state.clone(), query, permit, queued_at)
     .await
     .unwrap_or_else(|e| e.into_response());
-  state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+  state
+    .metrics
+    .status_codes_total
+    .with_label_values(&[resp.status().as_str()])
+    .inc();
   resp
 }
 
@@ -105,14 +114,22 @@ async fn handle_path(
         axum::body::Body::empty(),
       )
         .into_response();
-      state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+      state
+        .metrics
+        .status_codes_total
+        .with_label_values(&[resp.status().as_str()])
+        .inc();
       return resp;
     }
   };
   let resp = handle_path_inner(state.clone(), path, query, permit, queued_at)
     .await
     .unwrap_or_else(|e| e.into_response());
-  state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+  state
+    .metrics
+    .status_codes_total
+    .with_label_values(&[resp.status().as_str()])
+    .inc();
   resp
 }
 
@@ -134,8 +151,18 @@ async fn handle_query_inner(
   };
   let params = from_query(&query)?;
   let service = ProxyService::new(&state);
-  let result = service.process(params, url, permit, queued_at).await?;
-  Ok(build_response(result, &state.cfg))
+  let result = service.process(params, url, permit, queued_at).await;
+  match result {
+    Ok(r) => Ok(build_response(r, &state.cfg)),
+    Err(ref e) if is_upstream_error(e) => {
+      if let Some(fallback) = &state.fallback {
+        Ok(build_fallback_response(fallback, e, &state.cfg))
+      } else {
+        Err(result.unwrap_err())
+      }
+    }
+    Err(e) => Err(e),
+  }
 }
 
 async fn handle_path_inner(
@@ -157,8 +184,49 @@ async fn handle_path_inner(
     params.merge_from(query_params);
   }
   let svc = ProxyService::new(&state);
-  let result = svc.process(params, url, permit, queued_at).await?;
-  Ok(build_response(result, &state.cfg))
+  let result = svc.process(params, url, permit, queued_at).await;
+  match result {
+    Ok(r) => Ok(build_response(r, &state.cfg)),
+    Err(ref e) if is_upstream_error(e) => {
+      if let Some(fallback) = &state.fallback {
+        Ok(build_fallback_response(fallback, e, &state.cfg))
+      } else {
+        Err(result.unwrap_err())
+      }
+    }
+    Err(e) => Err(e),
+  }
+}
+
+fn is_upstream_error(e: &ProxyError) -> bool {
+  matches!(
+    e,
+    ProxyError::UpstreamNotFound | ProxyError::UpstreamTimeout | ProxyError::TooManyRedirects
+  )
+}
+
+fn build_fallback_response(fallback: &FallbackImage, err: &ProxyError, cfg: &Config) -> Response {
+  let ttl = cfg.fallback_image_ttl.unwrap_or(cfg.ttl);
+  let cache_control = format!("public, max-age={ttl}");
+
+  let status = if cfg.fallback_image_http_code == 0 {
+    err.clone().into_response().status()
+  } else {
+    StatusCode::from_u16(cfg.fallback_image_http_code).unwrap_or(StatusCode::OK)
+  };
+
+  let ct: axum::http::HeaderValue = fallback
+    .content_type
+    .parse()
+    .unwrap_or_else(|_| "application/octet-stream".parse().unwrap());
+
+  let mut headers = HeaderMap::new();
+  headers.insert(header::CONTENT_TYPE, ct);
+  headers.insert(header::CONTENT_LENGTH, fallback.bytes.len().into());
+  headers.insert(header::CACHE_CONTROL, cache_control.parse().unwrap());
+  headers.insert("x-fallback", "true".parse().unwrap());
+
+  (status, headers, fallback.bytes.clone()).into_response()
 }
 
 /// Converts a `ProcessResult` into an HTTP response.
@@ -229,6 +297,7 @@ mod concurrency_tests {
   use crate::modules::proxy::sources::http::HttpFetcher;
   use crate::modules::security::allowlist::Allowlist;
   use axum::http::StatusCode;
+  use base64::Engine;
   use std::net::{Ipv4Addr, SocketAddr};
   use std::sync::Arc;
   use tokio::sync::Semaphore;
@@ -270,6 +339,12 @@ mod concurrency_tests {
       best_format: Default::default(),
       prometheus_bind: None,
       prometheus_namespace: String::new(),
+      fallback_image_data: None,
+      fallback_image_path: None,
+      fallback_image_url: None,
+      fallback_image_http_code: 200,
+      fallback_image_ttl: None,
+      ttl: 86400,
     });
     let http = Arc::new(
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
@@ -283,6 +358,7 @@ mod concurrency_tests {
       concurrency: Arc::new(Semaphore::new(permits)),
       cfg,
       metrics,
+      fallback: None,
     }
   }
 
@@ -294,6 +370,12 @@ mod concurrency_tests {
       cfg: std::sync::Arc::new(cfg),
       ..base
     }
+  }
+
+  #[tokio::test]
+  async fn test_appstate_has_fallback_none_by_default() {
+    let state = make_state(1);
+    assert!(state.fallback.is_none());
   }
 
   #[tokio::test]
@@ -471,6 +553,120 @@ mod concurrency_tests {
     );
   }
 
+  fn make_state_with_fallback(
+    permits: usize,
+    fallback: Option<Arc<crate::modules::proxy::fallback::FallbackImage>>,
+  ) -> AppState {
+    AppState {
+      fallback,
+      ..make_state(permits)
+    }
+  }
+
+  #[tokio::test]
+  async fn test_fallback_served_on_upstream_404() {
+    use http_body_util::BodyExt;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+      .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==")
+      .unwrap();
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(png_bytes.clone()),
+      content_type: "image/png".to_string(),
+    }));
+    let state = make_state_with_fallback(256, fallback);
+    let app = crate::modules::router(state);
+
+    let url = format!("/proxy?url={}", urlencoding::encode(&server.uri()));
+    let req = axum::http::Request::builder()
+      .uri(&url)
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+      resp
+        .headers()
+        .get("x-fallback")
+        .and_then(|v| v.to_str().ok()),
+      Some("true")
+    );
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(body.as_ref(), png_bytes.as_slice());
+  }
+
+  #[tokio::test]
+  async fn test_no_fallback_on_invalid_signature() {
+    let mut cfg = (*make_state(1).cfg).clone();
+    cfg.hmac_key = Some("secret".to_string());
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(vec![1u8; 10]),
+      content_type: "image/png".to_string(),
+    }));
+    let state = AppState {
+      cfg: std::sync::Arc::new(cfg),
+      fallback,
+      ..make_state(1)
+    };
+    let app = crate::modules::router(state);
+    let req = axum::http::Request::builder()
+      .uri("/proxy?url=https://example.com/img.jpg")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+    assert!(resp.headers().get("x-fallback").is_none());
+  }
+
+  #[tokio::test]
+  async fn test_fallback_http_code_zero_uses_original_error_code() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+      .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==")
+      .unwrap();
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(png_bytes),
+      content_type: "image/png".to_string(),
+    }));
+    let mut cfg = (*make_state(1).cfg).clone();
+    cfg.fallback_image_http_code = 0;
+    let state = AppState {
+      cfg: std::sync::Arc::new(cfg),
+      fallback,
+      ..make_state(256)
+    };
+    let app = crate::modules::router(state);
+
+    let url = format!("/proxy?url={}", urlencoding::encode(&server.uri()));
+    let req = axum::http::Request::builder()
+      .uri(&url)
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(
+      resp
+        .headers()
+        .get("x-fallback")
+        .and_then(|v| v.to_str().ok()),
+      Some("true")
+    );
+  }
+
   #[tokio::test]
   async fn test_streaming_x_cache_miss_header() {
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
@@ -494,6 +690,92 @@ mod concurrency_tests {
     assert_eq!(
       resp.headers().get("x-cache").and_then(|v| v.to_str().ok()),
       Some("MISS")
+    );
+  }
+
+  #[tokio::test]
+  async fn test_fallback_ttl_uses_fallback_image_ttl_when_set() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+      .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==")
+      .unwrap();
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(png_bytes),
+      content_type: "image/png".to_string(),
+    }));
+
+    let mut cfg = (*make_state(1).cfg).clone();
+    cfg.fallback_image_ttl = Some(300);
+    cfg.ttl = 86400;
+    let state = AppState {
+      cfg: std::sync::Arc::new(cfg),
+      fallback,
+      ..make_state(256)
+    };
+    let app = crate::modules::router(state);
+
+    let url = format!("/proxy?url={}", urlencoding::encode(&server.uri()));
+    let req = axum::http::Request::builder()
+      .uri(&url)
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+      resp
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok()),
+      Some("public, max-age=300")
+    );
+  }
+
+  #[tokio::test]
+  async fn test_fallback_ttl_falls_back_to_pp_ttl() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(404))
+      .mount(&server)
+      .await;
+
+    let png_bytes = base64::engine::general_purpose::STANDARD
+      .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==")
+      .unwrap();
+    let fallback = Some(Arc::new(crate::modules::proxy::fallback::FallbackImage {
+      bytes: bytes::Bytes::from(png_bytes),
+      content_type: "image/png".to_string(),
+    }));
+
+    let mut cfg = (*make_state(1).cfg).clone();
+    cfg.fallback_image_ttl = None;
+    cfg.ttl = 1234;
+    let state = AppState {
+      cfg: std::sync::Arc::new(cfg),
+      fallback,
+      ..make_state(256)
+    };
+    let app = crate::modules::router(state);
+
+    let url = format!("/proxy?url={}", urlencoding::encode(&server.uri()));
+    let req = axum::http::Request::builder()
+      .uri(&url)
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+      resp
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok()),
+      Some("public, max-age=1234")
     );
   }
 }

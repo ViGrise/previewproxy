@@ -85,7 +85,8 @@ impl ProxyService {
       fn drop(&mut self) {
         self.metrics.requests_in_progress.dec();
         self.metrics.update_utilization();
-        self.metrics
+        self
+          .metrics
           .request_duration_seconds
           .observe(self.start.elapsed().as_secs_f64());
       }
@@ -95,7 +96,8 @@ impl ProxyService {
       start: Instant::now(),
     };
 
-    self.metrics
+    self
+      .metrics
       .request_span_duration_seconds
       .with_label_values(&["queue"])
       .observe(queued_at.elapsed().as_secs_f64());
@@ -187,8 +189,16 @@ impl ProxyService {
         Ok(r) => r,
         Err(e) => {
           guard.complete(Err(e.clone()));
-          let error_type = if matches!(e, ProxyError::UpstreamTimeout) { "timeout" } else { "downloading" };
-          self.metrics.errors_total.with_label_values(&[error_type]).inc();
+          let error_type = if matches!(e, ProxyError::UpstreamTimeout) {
+            "timeout"
+          } else {
+            "downloading"
+          };
+          self
+            .metrics
+            .errors_total
+            .with_label_values(&[error_type])
+            .inc();
           return Err(e);
         }
       };
@@ -293,7 +303,8 @@ impl ProxyService {
     tracing::info!(url = image_url.as_str(), "fetch start");
     let download_start = Instant::now();
     let fetch_result = self.fetcher.fetch(&image_url).await;
-    self.metrics
+    self
+      .metrics
       .request_span_duration_seconds
       .with_label_values(&["downloading"])
       .observe(download_start.elapsed().as_secs_f64());
@@ -309,12 +320,23 @@ impl ProxyService {
       }
       Err(e) => {
         guard.complete(Err(e.clone()));
-        let error_type = if matches!(e, ProxyError::UpstreamTimeout) { "timeout" } else { "downloading" };
-        self.metrics.errors_total.with_label_values(&[error_type]).inc();
+        let error_type = if matches!(e, ProxyError::UpstreamTimeout) {
+          "timeout"
+        } else {
+          "downloading"
+        };
+        self
+          .metrics
+          .errors_total
+          .with_label_values(&[error_type])
+          .inc();
         return Err(e);
       }
     };
-    self.metrics.buffer_size_bytes.observe(src_bytes.len() as f64);
+    self
+      .metrics
+      .buffer_size_bytes
+      .observe(src_bytes.len() as f64);
 
     // 8. Video interception (extract first/seeked frame and continue as PNG)
     let is_video = src_ct
@@ -362,13 +384,21 @@ impl ProxyService {
           }
           Err(e) => {
             guard.complete(Err(e.clone()));
-            self.metrics.errors_total.with_label_values(&["processing"]).inc();
+            self
+              .metrics
+              .errors_total
+              .with_label_values(&["processing"])
+              .inc();
             return Err(e);
           }
         },
         Err(e) => {
           guard.complete(Err(e.clone()));
-          self.metrics.errors_total.with_label_values(&["processing"]).inc();
+          self
+            .metrics
+            .errors_total
+            .with_label_values(&["processing"])
+            .inc();
           return Err(e);
         }
       }
@@ -417,7 +447,8 @@ impl ProxyService {
         content_type: ct,
       });
       self.metrics.images_in_progress.dec();
-      self.metrics
+      self
+        .metrics
         .request_span_duration_seconds
         .with_label_values(&["processing"])
         .observe(transform_start.elapsed().as_secs_f64());
@@ -441,7 +472,11 @@ impl ProxyService {
       Ok(e) => e,
       Err(e) => {
         guard.complete(Err(e.clone()));
-        self.metrics.errors_total.with_label_values(&["processing"]).inc();
+        self
+          .metrics
+          .errors_total
+          .with_label_values(&["processing"])
+          .inc();
         return Err(e);
       }
     };
@@ -530,6 +565,12 @@ mod tests {
       best_format: Default::default(),
       prometheus_bind: None,
       prometheus_namespace: String::new(),
+      fallback_image_data: None,
+      fallback_image_path: None,
+      fallback_image_url: None,
+      fallback_image_http_code: 200,
+      fallback_image_ttl: None,
+      ttl: 86400,
     })
   }
 
@@ -790,6 +831,12 @@ mod streaming_tests {
       best_format: Default::default(),
       prometheus_bind: None,
       prometheus_namespace: String::new(),
+      fallback_image_data: None,
+      fallback_image_path: None,
+      fallback_image_url: None,
+      fallback_image_http_code: 200,
+      fallback_image_ttl: None,
+      ttl: 86400,
     });
     let http = Arc::new(
       HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
@@ -831,7 +878,12 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        server.uri(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await
       .unwrap();
     assert!(matches!(result, ProcessResult::Stream { .. }));
@@ -850,7 +902,12 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        server.uri(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await;
     assert!(matches!(result, Err(ProxyError::NotAnImage)));
   }
@@ -871,7 +928,12 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        server.uri(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await;
     assert!(
       matches!(result, Err(ProxyError::VideoDecodeError)),
@@ -893,7 +955,12 @@ mod streaming_tests {
       .await;
     let (svc, _) = make_svc(1_000_000);
     let result = svc
-      .process(TransformParams::default(), server.uri(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        server.uri(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await;
     assert!(matches!(result, Err(ProxyError::PdfRenderError)));
   }
@@ -912,7 +979,12 @@ mod streaming_tests {
     let (svc, cache) = make_svc(1_000_000);
     let url = server.uri();
     let result = svc
-      .process(TransformParams::default(), url.clone(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        url.clone(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await
       .unwrap();
     if let ProcessResult::Stream { body, .. } = result {
@@ -956,7 +1028,12 @@ mod streaming_tests {
     let (svc, cache) = make_svc(1_000_000);
     let url = server.uri();
     let result = svc
-      .process(TransformParams::default(), url.clone(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        url.clone(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await
       .unwrap();
     if let ProcessResult::Stream { mut body, .. } = result {
@@ -1019,7 +1096,12 @@ mod streaming_tests {
     let (svc, cache) = make_svc(50);
     let url = server.uri();
     let result = svc
-      .process(TransformParams::default(), url.clone(), permit(), std::time::Instant::now())
+      .process(
+        TransformParams::default(),
+        url.clone(),
+        permit(),
+        std::time::Instant::now(),
+      )
       .await
       .unwrap();
     if let ProcessResult::Stream { mut body, .. } = result {

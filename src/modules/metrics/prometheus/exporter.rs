@@ -28,7 +28,6 @@ pub async fn handle_metrics(State(metrics): State<Arc<Metrics>>) -> Response {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
   use crate::modules::metrics::Metrics;
   use axum::http::StatusCode;
   use tower::ServiceExt;
@@ -50,7 +49,10 @@ mod tests {
       .get("content-type")
       .and_then(|v| v.to_str().ok())
       .unwrap_or("");
-    assert!(ct.contains("text/plain"), "content-type should be text/plain, got: {ct}");
+    assert!(
+      ct.contains("text/plain"),
+      "content-type should be text/plain, got: {ct}"
+    );
   }
 
   #[tokio::test]

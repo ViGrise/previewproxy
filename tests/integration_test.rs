@@ -155,10 +155,7 @@ async fn test_local_source_passthrough() {
   unsafe {
     std::env::set_var("PP_PORT", "8081");
     std::env::set_var("PP_APP_ENV", "development");
-    std::env::set_var(
-      "PP_CACHE_DIR",
-      "/tmp/previewproxy-test-local-passthrough",
-    );
+    std::env::set_var("PP_CACHE_DIR", "/tmp/previewproxy-test-local-passthrough");
     std::env::set_var("PP_CACHE_MEMORY_MAX_MB", "10");
     std::env::remove_var("PP_HMAC_KEY");
     std::env::remove_var("PP_ALLOWED_HOSTS");
@@ -196,10 +193,7 @@ async fn test_local_source_with_resize() {
   unsafe {
     std::env::set_var("PP_PORT", "8081");
     std::env::set_var("PP_APP_ENV", "development");
-    std::env::set_var(
-      "PP_CACHE_DIR",
-      "/tmp/previewproxy-test-local-resize",
-    );
+    std::env::set_var("PP_CACHE_DIR", "/tmp/previewproxy-test-local-resize");
     std::env::set_var("PP_CACHE_MEMORY_MAX_MB", "10");
     std::env::remove_var("PP_HMAC_KEY");
     std::env::remove_var("PP_ALLOWED_HOSTS");

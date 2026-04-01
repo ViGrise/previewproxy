@@ -1,6 +1,7 @@
 use crate::common::{config::Config, config::Environment, config::telemetry, middlewares};
 use crate::modules::AppState;
 use crate::modules::cache::manager::CacheManager;
+use crate::modules::proxy::fallback::FallbackImage;
 use crate::modules::proxy::fetchable::Fetchable;
 use crate::modules::proxy::sources::http::HttpFetcher;
 use crate::modules::proxy::sources::{AliasSource, LocalSource, S3Source, SourceRouter};
@@ -68,6 +69,8 @@ pub async fn router(
 
   let concurrency = Arc::new(Semaphore::new(cfg.max_concurrent_requests));
 
+  let fallback = FallbackImage::load(&cfg).await;
+
   let app_state = AppState {
     cfg,
     cache,
@@ -75,6 +78,7 @@ pub async fn router(
     http_fetcher,
     concurrency,
     metrics,
+    fallback,
   };
 
   let trace_layer = telemetry::trace_layer();
