@@ -116,6 +116,7 @@ impl CacheManager {
       .cache_entries
       .with_label_values(&["memory"])
       .set(self.l1.item_count() as i64);
+    // disk entry count is not tracked; DiskCache does not expose it
   }
 
   pub fn inflight(&self) -> &InflightMap {

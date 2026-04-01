@@ -262,13 +262,14 @@ mod concurrency_tests {
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
         .with_private_ip_check(false),
     );
+    let metrics = crate::modules::metrics::Metrics::new("");
     AppState {
-      cache: CacheManager::new(&cfg, crate::modules::metrics::Metrics::new("")),
+      cache: CacheManager::new(&cfg, metrics.clone()),
       fetcher: http.clone(),
       http_fetcher: http,
       concurrency: Arc::new(Semaphore::new(permits)),
       cfg,
-      metrics: crate::modules::metrics::Metrics::new(""),
+      metrics,
     }
   }
 
