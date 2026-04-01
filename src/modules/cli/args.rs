@@ -226,6 +226,30 @@ pub struct Cli {
   #[arg(long, env = "PP_PROMETHEUS_NAMESPACE", default_value = "")]
   pub prometheus_namespace: String,
 
+  /// Base64-encoded fallback image data [env: PP_FALLBACK_IMAGE_DATA]
+  #[arg(long, env = "PP_FALLBACK_IMAGE_DATA")]
+  pub fallback_image_data: Option<String>,
+
+  /// Path to local fallback image file [env: PP_FALLBACK_IMAGE_PATH]
+  #[arg(long, env = "PP_FALLBACK_IMAGE_PATH", default_value = "")]
+  pub fallback_image_path: String,
+
+  /// URL of fallback image [env: PP_FALLBACK_IMAGE_URL]
+  #[arg(long, env = "PP_FALLBACK_IMAGE_URL", default_value = "")]
+  pub fallback_image_url: String,
+
+  /// HTTP status code for fallback responses; 0 = use original error code [env: PP_FALLBACK_IMAGE_HTTP_CODE]
+  #[arg(long, env = "PP_FALLBACK_IMAGE_HTTP_CODE", default_value_t = 200u16)]
+  pub fallback_image_http_code: u16,
+
+  /// TTL in seconds for fallback image responses; 0 = use PP_TTL [env: PP_FALLBACK_IMAGE_TTL]
+  #[arg(long, env = "PP_FALLBACK_IMAGE_TTL", default_value_t = 0u64)]
+  pub fallback_image_ttl: u64,
+
+  /// General response TTL in seconds [env: PP_TTL]
+  #[arg(long, env = "PP_TTL", default_value_t = 86400u64)]
+  pub ttl: u64,
+
   #[command(subcommand)]
   pub command: Option<Commands>,
 }
@@ -328,6 +352,21 @@ impl Cli {
       );
       std::env::set_var("PP_PROMETHEUS_BIND", &self.prometheus_bind);
       std::env::set_var("PP_PROMETHEUS_NAMESPACE", &self.prometheus_namespace);
+      std::env::set_var(
+        "PP_FALLBACK_IMAGE_DATA",
+        self.fallback_image_data.as_deref().unwrap_or(""),
+      );
+      std::env::set_var("PP_FALLBACK_IMAGE_PATH", &self.fallback_image_path);
+      std::env::set_var("PP_FALLBACK_IMAGE_URL", &self.fallback_image_url);
+      std::env::set_var(
+        "PP_FALLBACK_IMAGE_HTTP_CODE",
+        self.fallback_image_http_code.to_string(),
+      );
+      std::env::set_var(
+        "PP_FALLBACK_IMAGE_TTL",
+        self.fallback_image_ttl.to_string(),
+      );
+      std::env::set_var("PP_TTL", self.ttl.to_string());
     }
   }
 }
@@ -530,5 +569,25 @@ mod tests {
       std::env::var("PP_SOURCE_URL_ENCRYPTION_KEY").unwrap(),
       "hexkey"
     );
+  }
+
+  #[test]
+  fn test_fallback_image_cli_defaults() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe {
+      std::env::remove_var("PP_FALLBACK_IMAGE_DATA");
+      std::env::remove_var("PP_FALLBACK_IMAGE_PATH");
+      std::env::remove_var("PP_FALLBACK_IMAGE_URL");
+      std::env::remove_var("PP_FALLBACK_IMAGE_HTTP_CODE");
+      std::env::remove_var("PP_FALLBACK_IMAGE_TTL");
+      std::env::remove_var("PP_TTL");
+    }
+    let cli = Cli::parse_from(["previewproxy"]);
+    assert!(cli.fallback_image_data.is_none());
+    assert_eq!(cli.fallback_image_path, "");
+    assert_eq!(cli.fallback_image_url, "");
+    assert_eq!(cli.fallback_image_http_code, 200u16);
+    assert_eq!(cli.fallback_image_ttl, 0u64);
+    assert_eq!(cli.ttl, 86400u64);
   }
 }
