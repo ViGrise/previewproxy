@@ -30,11 +30,17 @@ pub fn frame_to_png_bytes(img: DynamicImage) -> Result<Vec<u8>, ProxyError> {
 /// Spawns `<ffmpeg_bin> -ss <t_secs> -i <tmpfile> -vframes 1 -f image2 -vcodec png pipe:1`.
 /// Uses a fast keyframe seek (-ss before -i); the extracted frame is the nearest
 /// prior keyframe, not frame-accurate. Acceptable for preview thumbnail generation.
+#[tracing::instrument(skip(bytes), fields(bytes = bytes.len(), t_secs, ffmpeg_bin))]
 pub async fn extract_frame(
   bytes: &[u8],
   t_secs: f32,
   ffmpeg_bin: &str,
 ) -> Result<DynamicImage, ProxyError> {
+  tracing::debug!(
+    t_secs = t_secs,
+    ffmpeg_bin = ffmpeg_bin,
+    "extract_frame start"
+  );
   // Write bytes to a temp file. Hold the handle alive until ffmpeg exits.
   let tmp = tempfile::NamedTempFile::new().map_err(|e| ProxyError::InternalError(e.to_string()))?;
   std::fs::write(tmp.path(), bytes).map_err(|e| ProxyError::InternalError(e.to_string()))?;
@@ -85,6 +91,12 @@ pub async fn extract_frame(
     .decode()
     .map_err(|_| ProxyError::VideoDecodeError)?;
 
+  tracing::debug!(
+    t_secs = t_secs,
+    width = img.width(),
+    height = img.height(),
+    "extract_frame complete"
+  );
   Ok(img)
 }
 
@@ -92,7 +104,9 @@ pub async fn extract_frame(
 ///
 /// Runs: `ffprobe -v error -show_entries format=duration -of csv=p=0 <tmpfile>`
 /// Returns `ProxyError::VideoDecodeError` if ffprobe fails or output cannot be parsed.
+#[tracing::instrument(skip(bytes), fields(bytes = bytes.len(), ffprobe_bin))]
 pub async fn probe_duration(bytes: &[u8], ffprobe_bin: &str) -> Result<f32, ProxyError> {
+  tracing::debug!(ffprobe_bin = ffprobe_bin, "probe_duration start");
   let tmp = tempfile::NamedTempFile::new().map_err(|e| ProxyError::InternalError(e.to_string()))?;
   std::fs::write(tmp.path(), bytes).map_err(|e| ProxyError::InternalError(e.to_string()))?;
 
@@ -130,10 +144,17 @@ pub async fn probe_duration(bytes: &[u8], ffprobe_bin: &str) -> Result<f32, Prox
   }
 
   let stdout = String::from_utf8_lossy(&output.stdout);
-  stdout.trim().parse::<f32>().map_err(|_| {
-    tracing::warn!("ffprobe returned unparseable duration: {stdout:?}");
-    ProxyError::VideoDecodeError
-  })
+  stdout
+    .trim()
+    .parse::<f32>()
+    .map_err(|_| {
+      tracing::warn!("ffprobe returned unparseable duration: {stdout:?}");
+      ProxyError::VideoDecodeError
+    })
+    .map(|dur| {
+      tracing::debug!(duration_secs = dur, "probe_duration complete");
+      dur
+    })
 }
 
 #[cfg(test)]

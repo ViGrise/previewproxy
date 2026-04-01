@@ -1,5 +1,6 @@
 use anyhow::Result;
 use semver::Version;
+use tracing::{info, warn};
 
 pub fn compare_versions(current: &str, latest: &str) -> std::cmp::Ordering {
   let cur = Version::parse(current).expect("invalid current version");
@@ -83,16 +84,19 @@ pub async fn run_upgrade() -> Result<()> {
 
   match compare_versions(current, &tag) {
     std::cmp::Ordering::Equal => {
+      info!(version = current, "already up to date");
       println!("Already up to date (v{current})");
       return Ok(());
     }
     std::cmp::Ordering::Greater => {
+      warn!(current, latest = %tag, "current version is newer than latest release, skipping upgrade");
       println!("Current version v{current} is newer than latest release v{tag}, skipping");
       return Ok(());
     }
     std::cmp::Ordering::Less => {}
   }
 
+  info!(from = current, to = %tag, "upgrading");
   println!("Upgrading v{current} -> v{tag}...");
 
   let url = download_url(&tag);
@@ -158,6 +162,7 @@ pub async fn run_upgrade() -> Result<()> {
     std::mem::forget(tmp_path);
   }
 
+  info!(version = %tag, "upgrade complete, restart to apply");
   println!("Upgraded to v{tag}. Restart to apply.");
   Ok(())
 }

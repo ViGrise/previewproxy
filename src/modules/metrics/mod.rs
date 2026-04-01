@@ -45,117 +45,182 @@ impl Metrics {
 
     let ns = namespace;
 
-    let requests_total = register!(IntCounter::with_opts(
-      Opts::new("requests_total", "Total number of HTTP requests processed").namespace(ns)
-    )
-    .unwrap());
-
-    let status_codes_total = register!(IntCounterVec::new(
-      Opts::new("status_codes_total", "Response status codes").namespace(ns),
-      &["status"]
-    )
-    .unwrap());
-
-    let errors_total = register!(IntCounterVec::new(
-      Opts::new("errors_total", "Errors by type").namespace(ns),
-      &["type"]
-    )
-    .unwrap());
-
-    let request_duration_seconds = register!(Histogram::with_opts(
-      HistogramOpts::new("request_duration_seconds", "Full request latency in seconds")
-        .namespace(ns)
-        .buckets(vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0])
-    )
-    .unwrap());
-
-    let request_span_duration_seconds = register!(HistogramVec::new(
-      HistogramOpts::new(
-        "request_span_duration_seconds",
-        "Request latency by span in seconds"
+    let requests_total = register!(
+      IntCounter::with_opts(
+        Opts::new("requests_total", "Total number of HTTP requests processed").namespace(ns)
       )
-      .namespace(ns)
-      .buckets(vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]),
-      &["span"]
-    )
-    .unwrap());
+      .unwrap()
+    );
 
-    let buffer_size_bytes = register!(Histogram::with_opts(
-      HistogramOpts::new("buffer_size_bytes", "Download buffer sizes in bytes")
+    let status_codes_total = register!(
+      IntCounterVec::new(
+        Opts::new("status_codes_total", "Response status codes").namespace(ns),
+        &["status"]
+      )
+      .unwrap()
+    );
+
+    let errors_total = register!(
+      IntCounterVec::new(
+        Opts::new("errors_total", "Errors by type").namespace(ns),
+        &["type"]
+      )
+      .unwrap()
+    );
+
+    let request_duration_seconds = register!(
+      Histogram::with_opts(
+        HistogramOpts::new(
+          "request_duration_seconds",
+          "Full request latency in seconds"
+        )
         .namespace(ns)
         .buckets(vec![
-          1_024.0,
-          10_240.0,
-          102_400.0,
-          1_048_576.0,
-          5_242_880.0,
-          10_485_760.0,
-          20_971_520.0,
+          0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
         ])
-    )
-    .unwrap());
-
-    let workers = register!(IntGauge::with_opts(
-      Opts::new("workers", "Configured number of workers (max_concurrent_requests)").namespace(ns)
-    )
-    .unwrap());
-
-    let requests_in_progress = register!(IntGauge::with_opts(
-      Opts::new("requests_in_progress", "Number of requests currently in progress").namespace(ns)
-    )
-    .unwrap());
-
-    let images_in_progress = register!(IntGauge::with_opts(
-      Opts::new("images_in_progress", "Number of images currently being processed").namespace(ns)
-    )
-    .unwrap());
-
-    let workers_utilization = register!(Gauge::with_opts(
-      Opts::new(
-        "workers_utilization",
-        "Percentage of workers utilization (requests_in_progress / workers * 100)"
       )
-      .namespace(ns)
-    )
-    .unwrap());
+      .unwrap()
+    );
 
-    let buffer_default_size_bytes = register!(Gauge::with_opts(
-      Opts::new("buffer_default_size_bytes", "Calibrated default buffer size in bytes").namespace(ns)
-    )
-    .unwrap());
+    let request_span_duration_seconds = register!(
+      HistogramVec::new(
+        HistogramOpts::new(
+          "request_span_duration_seconds",
+          "Request latency by span in seconds"
+        )
+        .namespace(ns)
+        .buckets(vec![
+          0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
+        ]),
+        &["span"]
+      )
+      .unwrap()
+    );
 
-    let buffer_max_size_bytes = register!(Gauge::with_opts(
-      Opts::new("buffer_max_size_bytes", "Calibrated maximum buffer size in bytes").namespace(ns)
-    )
-    .unwrap());
+    let buffer_size_bytes = register!(
+      Histogram::with_opts(
+        HistogramOpts::new("buffer_size_bytes", "Download buffer sizes in bytes")
+          .namespace(ns)
+          .buckets(vec![
+            1_024.0,
+            10_240.0,
+            102_400.0,
+            1_048_576.0,
+            5_242_880.0,
+            10_485_760.0,
+            20_971_520.0,
+          ])
+      )
+      .unwrap()
+    );
 
-    let cache_hits_total = register!(IntCounterVec::new(
-      Opts::new("cache_hits_total", "Cache hits by layer").namespace(ns),
-      &["layer"]
-    )
-    .unwrap());
+    let workers = register!(
+      IntGauge::with_opts(
+        Opts::new(
+          "workers",
+          "Configured number of workers (max_concurrent_requests)"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
 
-    let cache_misses_total = register!(IntCounterVec::new(
-      Opts::new("cache_misses_total", "Cache misses by layer").namespace(ns),
-      &["layer"]
-    )
-    .unwrap());
+    let requests_in_progress = register!(
+      IntGauge::with_opts(
+        Opts::new(
+          "requests_in_progress",
+          "Number of requests currently in progress"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
 
-    let cache_memory_size_bytes = register!(Gauge::with_opts(
-      Opts::new("cache_memory_size_bytes", "Current memory cache size in bytes").namespace(ns)
-    )
-    .unwrap());
+    let images_in_progress = register!(
+      IntGauge::with_opts(
+        Opts::new(
+          "images_in_progress",
+          "Number of images currently being processed"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
 
-    let cache_disk_size_bytes = register!(Gauge::with_opts(
-      Opts::new("cache_disk_size_bytes", "Current disk cache size in bytes").namespace(ns)
-    )
-    .unwrap());
+    let workers_utilization = register!(
+      Gauge::with_opts(
+        Opts::new(
+          "workers_utilization",
+          "Percentage of workers utilization (requests_in_progress / workers * 100)"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
 
-    let cache_entries = register!(IntGaugeVec::new(
-      Opts::new("cache_entries", "Current cache entry count by layer").namespace(ns),
-      &["layer"]
-    )
-    .unwrap());
+    let buffer_default_size_bytes = register!(
+      Gauge::with_opts(
+        Opts::new(
+          "buffer_default_size_bytes",
+          "Calibrated default buffer size in bytes"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
+
+    let buffer_max_size_bytes = register!(
+      Gauge::with_opts(
+        Opts::new(
+          "buffer_max_size_bytes",
+          "Calibrated maximum buffer size in bytes"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
+
+    let cache_hits_total = register!(
+      IntCounterVec::new(
+        Opts::new("cache_hits_total", "Cache hits by layer").namespace(ns),
+        &["layer"]
+      )
+      .unwrap()
+    );
+
+    let cache_misses_total = register!(
+      IntCounterVec::new(
+        Opts::new("cache_misses_total", "Cache misses by layer").namespace(ns),
+        &["layer"]
+      )
+      .unwrap()
+    );
+
+    let cache_memory_size_bytes = register!(
+      Gauge::with_opts(
+        Opts::new(
+          "cache_memory_size_bytes",
+          "Current memory cache size in bytes"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
+
+    let cache_disk_size_bytes = register!(
+      Gauge::with_opts(
+        Opts::new("cache_disk_size_bytes", "Current disk cache size in bytes").namespace(ns)
+      )
+      .unwrap()
+    );
+
+    let cache_entries = register!(
+      IntGaugeVec::new(
+        Opts::new("cache_entries", "Current cache entry count by layer").namespace(ns),
+        &["layer"]
+      )
+      .unwrap()
+    );
 
     Arc::new(Self {
       registry,

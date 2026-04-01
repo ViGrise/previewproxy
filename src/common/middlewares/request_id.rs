@@ -2,14 +2,16 @@ use axum::{extract::Request, http::HeaderName};
 use tower_http::request_id::{
   MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
 };
+use tracing::debug;
 
 #[derive(Clone, Default)]
 pub struct Id;
 
 impl MakeRequestId for Id {
   fn make_request_id<B>(&mut self, _: &Request<B>) -> Option<RequestId> {
-    let id = uuid::Uuid::now_v7().to_string().parse().unwrap();
-    Some(RequestId::new(id))
+    let id = uuid::Uuid::now_v7().to_string();
+    debug!(request_id = %id, "request ID assigned");
+    Some(RequestId::new(id.parse().unwrap()))
   }
 }
 

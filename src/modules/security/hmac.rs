@@ -1,11 +1,13 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use tracing::debug;
 
 type HmacSha256 = Hmac<Sha256>;
 
 /// Signs `message` with HMAC-SHA256 and returns a URL-safe base64 (no-pad) digest.
 /// The canonical message format is `"<params>:<image_url>"`.
+#[tracing::instrument(skip(key, message))]
 pub fn sign(key: &str, message: &str) -> String {
   let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC can take key of any size");
   mac.update(message.as_bytes());
@@ -13,18 +15,30 @@ pub fn sign(key: &str, message: &str) -> String {
 }
 
 /// Verifies `sig` against the expected HMAC of `message` using constant-time comparison.
+#[tracing::instrument(skip(key, message, sig))]
 pub fn verify(key: &str, message: &str, sig: &str) -> bool {
   let expected = sign(key, message);
   // Constant-time comparison to prevent timing attacks
   let a = expected.as_bytes();
   let b = sig.as_bytes();
   if a.len() != b.len() {
+    debug!(
+      result = "fail",
+      reason = "length_mismatch",
+      "hmac verify failed"
+    );
     return false;
   }
-  a.iter()
+  let matched = a
+    .iter()
     .zip(b.iter())
     .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-    == 0
+    == 0;
+  debug!(
+    result = if matched { "pass" } else { "fail" },
+    "hmac verify result"
+  );
+  matched
 }
 
 #[cfg(test)]

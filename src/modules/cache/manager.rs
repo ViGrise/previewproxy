@@ -60,20 +60,36 @@ impl CacheManager {
   pub async fn get(&self, prelim_key: &str) -> (Option<CacheEntry>, CacheHit) {
     if let Some(e) = self.l1.get(prelim_key).await {
       debug!(key = %prelim_key, bytes = e.bytes.len(), "L1 cache hit");
-      self.metrics.cache_hits_total.with_label_values(&["memory"]).inc();
+      self
+        .metrics
+        .cache_hits_total
+        .with_label_values(&["memory"])
+        .inc();
       self.record_cache_sizes();
       return (Some(e), CacheHit::L1);
     }
     if let Ok(Some(e)) = self.l2.get(prelim_key).await {
       debug!(key = %prelim_key, bytes = e.bytes.len(), "L2 cache hit - promoting to L1");
       self.l1.set(prelim_key.to_string(), e.clone()).await;
-      self.metrics.cache_hits_total.with_label_values(&["disk"]).inc();
+      self
+        .metrics
+        .cache_hits_total
+        .with_label_values(&["disk"])
+        .inc();
       self.record_cache_sizes();
       return (Some(e), CacheHit::L2);
     }
     debug!(key = %prelim_key, "cache miss");
-    self.metrics.cache_misses_total.with_label_values(&["memory"]).inc();
-    self.metrics.cache_misses_total.with_label_values(&["disk"]).inc();
+    self
+      .metrics
+      .cache_misses_total
+      .with_label_values(&["memory"])
+      .inc();
+    self
+      .metrics
+      .cache_misses_total
+      .with_label_values(&["disk"])
+      .inc();
     self.record_cache_sizes();
     (None, CacheHit::Miss)
   }
@@ -87,9 +103,19 @@ impl CacheManager {
   }
 
   fn record_cache_sizes(&self) {
-    self.metrics.cache_memory_size_bytes.set(self.l1.size_bytes() as f64);
-    self.metrics.cache_disk_size_bytes.set(self.disk_total_bytes() as f64);
-    self.metrics.cache_entries.with_label_values(&["memory"]).set(self.l1.item_count() as i64);
+    self
+      .metrics
+      .cache_memory_size_bytes
+      .set(self.l1.size_bytes() as f64);
+    self
+      .metrics
+      .cache_disk_size_bytes
+      .set(self.disk_total_bytes() as f64);
+    self
+      .metrics
+      .cache_entries
+      .with_label_values(&["memory"])
+      .set(self.l1.item_count() as i64);
   }
 
   pub fn inflight(&self) -> &InflightMap {

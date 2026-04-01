@@ -1,6 +1,7 @@
 use crate::common::errors::ProxyError;
 use image::{DynamicImage, imageops::FilterType};
 
+#[tracing::instrument(skip(img), fields(orig_w = img.width(), orig_h = img.height()))]
 pub fn resize(
   img: DynamicImage,
   w: Option<u32>,
@@ -27,6 +28,7 @@ pub fn resize(
     "cover" | "crop" => img.resize_to_fill(target_w, target_h, FilterType::Lanczos3),
     _ => img.resize(target_w, target_h, FilterType::Lanczos3),
   };
+  tracing::debug!(target_w, target_h, fit, "resize: op applied");
   Ok(result)
 }
 

@@ -1,10 +1,13 @@
 use crate::common::errors::ProxyError;
 use image::{DynamicImage, imageops};
 
+#[tracing::instrument(skip(img))]
 pub fn to_grayscale(img: DynamicImage) -> Result<DynamicImage, ProxyError> {
+  tracing::debug!("color: grayscale op applied");
   Ok(img.grayscale())
 }
 
+#[tracing::instrument(skip(img))]
 pub fn brightness_contrast(
   img: DynamicImage,
   bright: i32,
@@ -17,6 +20,7 @@ pub fn brightness_contrast(
   if contrast != 0 {
     result = DynamicImage::ImageRgba8(imageops::contrast(&result, contrast as f32));
   }
+  tracing::debug!(bright, contrast, "color: brightness_contrast op applied");
   Ok(result)
 }
 

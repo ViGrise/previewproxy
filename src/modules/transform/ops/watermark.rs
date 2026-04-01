@@ -1,6 +1,7 @@
 use crate::common::errors::ProxyError;
 use image::{DynamicImage, imageops};
 
+#[tracing::instrument(skip(base, wm), fields(base_w = base.width(), base_h = base.height()))]
 pub fn apply_watermark_sync(
   base: DynamicImage,
   wm: DynamicImage,
@@ -24,6 +25,13 @@ pub fn apply_watermark_sync(
 
   let mut base_rgba = base.to_rgba8();
   imageops::overlay(&mut base_rgba, &wm_resized.to_rgba8(), x as i64, y as i64);
+  tracing::debug!(
+    wm_w = wm_resized.width(),
+    wm_h = wm_resized.height(),
+    x,
+    y,
+    "watermark: op applied"
+  );
   Ok(DynamicImage::ImageRgba8(base_rgba))
 }
 

@@ -9,127 +9,127 @@ pub struct Cli {
   #[arg(long, value_name = "PATH", global = true)]
   pub env_file: Option<String>,
 
-  /// Server port [env: PREVIEWPROXY_PORT]
-  #[arg(short, long, env = "PREVIEWPROXY_PORT", default_value = "8080")]
+  /// Server port [env: PP_PORT]
+  #[arg(short, long, env = "PP_PORT", default_value = "8080")]
   pub port: u16,
 
-  /// Environment: development or production [env: PREVIEWPROXY_APP_ENV]
+  /// Environment: development or production [env: PP_APP_ENV]
   #[arg(
     short = 'E',
     long,
-    env = "PREVIEWPROXY_APP_ENV",
+    env = "PP_APP_ENV",
     default_value = "development"
   )]
   pub env: String,
 
-  /// HMAC signing key (leave empty to disable) [env: PREVIEWPROXY_HMAC_KEY]
-  #[arg(short = 'k', long, env = "PREVIEWPROXY_HMAC_KEY")]
+  /// HMAC signing key (leave empty to disable) [env: PP_HMAC_KEY]
+  #[arg(short = 'k', long, env = "PP_HMAC_KEY")]
   pub hmac_key: Option<String>,
 
-  /// Comma-separated allowed upstream hosts (empty = allow all) [env: PREVIEWPROXY_ALLOWED_HOSTS]
+  /// Comma-separated allowed upstream hosts (empty = allow all) [env: PP_ALLOWED_HOSTS]
   #[arg(
     short = 'a',
     long,
-    env = "PREVIEWPROXY_ALLOWED_HOSTS",
+    env = "PP_ALLOWED_HOSTS",
     default_value = ""
   )]
   pub allowed_hosts: String,
 
-  /// Upstream fetch timeout in seconds [env: PREVIEWPROXY_FETCH_TIMEOUT_SECS]
+  /// Upstream fetch timeout in seconds [env: PP_FETCH_TIMEOUT_SECS]
   #[arg(
     short = 't',
     long,
-    env = "PREVIEWPROXY_FETCH_TIMEOUT_SECS",
+    env = "PP_FETCH_TIMEOUT_SECS",
     default_value = "10"
   )]
   pub fetch_timeout_secs: u64,
 
-  /// Maximum source image size in bytes [env: PREVIEWPROXY_MAX_SOURCE_BYTES]
+  /// Maximum source image size in bytes [env: PP_MAX_SOURCE_BYTES]
   #[arg(
     short = 's',
     long,
-    env = "PREVIEWPROXY_MAX_SOURCE_BYTES",
+    env = "PP_MAX_SOURCE_BYTES",
     default_value = "20971520"
   )]
   pub max_source_bytes: u64,
 
-  /// L1 in-memory cache size in MB [env: PREVIEWPROXY_CACHE_MEMORY_MAX_MB]
-  #[arg(long, env = "PREVIEWPROXY_CACHE_MEMORY_MAX_MB", default_value = "256")]
+  /// L1 in-memory cache size in MB [env: PP_CACHE_MEMORY_MAX_MB]
+  #[arg(long, env = "PP_CACHE_MEMORY_MAX_MB", default_value = "256")]
   pub cache_memory_max_mb: u64,
 
-  /// L1 in-memory cache TTL in seconds [env: PREVIEWPROXY_CACHE_MEMORY_TTL_SECS]
+  /// L1 in-memory cache TTL in seconds [env: PP_CACHE_MEMORY_TTL_SECS]
   #[arg(
     long,
-    env = "PREVIEWPROXY_CACHE_MEMORY_TTL_SECS",
+    env = "PP_CACHE_MEMORY_TTL_SECS",
     default_value = "3600"
   )]
   pub cache_memory_ttl_secs: u64,
 
-  /// L2 disk cache directory [env: PREVIEWPROXY_CACHE_DIR]
+  /// L2 disk cache directory [env: PP_CACHE_DIR]
   #[arg(
     short = 'D',
     long,
-    env = "PREVIEWPROXY_CACHE_DIR",
+    env = "PP_CACHE_DIR",
     default_value = "/tmp/previewproxy"
   )]
   pub cache_dir: String,
 
-  /// L2 disk cache TTL in seconds [env: PREVIEWPROXY_CACHE_DISK_TTL_SECS]
+  /// L2 disk cache TTL in seconds [env: PP_CACHE_DISK_TTL_SECS]
   #[arg(
     long,
-    env = "PREVIEWPROXY_CACHE_DISK_TTL_SECS",
+    env = "PP_CACHE_DISK_TTL_SECS",
     default_value = "86400"
   )]
   pub cache_disk_ttl_secs: u64,
 
-  /// L2 disk cache max size in MB (empty = unlimited) [env: PREVIEWPROXY_CACHE_DISK_MAX_MB]
-  #[arg(long, env = "PREVIEWPROXY_CACHE_DISK_MAX_MB", default_value = "")]
+  /// L2 disk cache max size in MB (empty = unlimited) [env: PP_CACHE_DISK_MAX_MB]
+  #[arg(long, env = "PP_CACHE_DISK_MAX_MB", default_value = "")]
   pub cache_disk_max_mb: String,
 
-  /// Cache cleanup interval in seconds [env: PREVIEWPROXY_CACHE_CLEANUP_INTERVAL_SECS]
+  /// Cache cleanup interval in seconds [env: PP_CACHE_CLEANUP_INTERVAL_SECS]
   #[arg(
     long,
-    env = "PREVIEWPROXY_CACHE_CLEANUP_INTERVAL_SECS",
+    env = "PP_CACHE_CLEANUP_INTERVAL_SECS",
     default_value = "600"
   )]
   pub cache_cleanup_interval_secs: u64,
 
-  /// Path to the ffmpeg binary [env: PREVIEWPROXY_FFMPEG_PATH]
-  #[arg(long, env = "PREVIEWPROXY_FFMPEG_PATH", default_value = "ffmpeg")]
+  /// Path to the ffmpeg binary [env: PP_FFMPEG_PATH]
+  #[arg(long, env = "PP_FFMPEG_PATH", default_value = "ffmpeg")]
   pub ffmpeg_path: String,
 
-  /// Path to the ffprobe binary (defaults to ffprobe in same dir as ffmpeg) [env: PREVIEWPROXY_FFPROBE_PATH]
-  #[arg(long, env = "PREVIEWPROXY_FFPROBE_PATH", default_value = "")]
+  /// Path to the ffprobe binary (defaults to ffprobe in same dir as ffmpeg) [env: PP_FFPROBE_PATH]
+  #[arg(long, env = "PP_FFPROBE_PATH", default_value = "")]
   pub ffprobe_path: String,
 
-  /// Comma-separated allowed CORS origins; * = allow all [env: PREVIEWPROXY_CORS_ALLOW_ORIGIN]
-  #[arg(long, env = "PREVIEWPROXY_CORS_ALLOW_ORIGIN", default_value = "*")]
+  /// Comma-separated allowed CORS origins; * = allow all [env: PP_CORS_ALLOW_ORIGIN]
+  #[arg(long, env = "PP_CORS_ALLOW_ORIGIN", default_value = "*")]
   pub cors_allow_origin: String,
 
-  /// CORS max-age in seconds [env: PREVIEWPROXY_CORS_MAX_AGE_SECS]
-  #[arg(long, env = "PREVIEWPROXY_CORS_MAX_AGE_SECS", default_value = "600")]
+  /// CORS max-age in seconds [env: PP_CORS_MAX_AGE_SECS]
+  #[arg(long, env = "PP_CORS_MAX_AGE_SECS", default_value = "600")]
   pub cors_max_age_secs: u64,
 
-  /// Comma-separated input formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,pdf,psd,video) [env: PREVIEWPROXY_INPUT_DISALLOW_LIST]
-  #[arg(long, env = "PREVIEWPROXY_INPUT_DISALLOW_LIST", default_value = "")]
+  /// Comma-separated input formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,pdf,psd,video) [env: PP_INPUT_DISALLOW_LIST]
+  #[arg(long, env = "PP_INPUT_DISALLOW_LIST", default_value = "")]
   pub input_disallow_list: String,
 
-  /// Comma-separated output formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,ico) [env: PREVIEWPROXY_OUTPUT_DISALLOW_LIST]
-  #[arg(long, env = "PREVIEWPROXY_OUTPUT_DISALLOW_LIST", default_value = "")]
+  /// Comma-separated output formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,ico) [env: PP_OUTPUT_DISALLOW_LIST]
+  #[arg(long, env = "PP_OUTPUT_DISALLOW_LIST", default_value = "")]
   pub output_disallow_list: String,
 
-  /// Comma-separated transforms to block (resize,rotate,flip,grayscale,brightness,contrast,blur,watermark,gif_anim) [env: PREVIEWPROXY_TRANSFORM_DISALLOW_LIST]
-  #[arg(long, env = "PREVIEWPROXY_TRANSFORM_DISALLOW_LIST", default_value = "")]
+  /// Comma-separated transforms to block (resize,rotate,flip,grayscale,brightness,contrast,blur,watermark,gif_anim) [env: PP_TRANSFORM_DISALLOW_LIST]
+  #[arg(long, env = "PP_TRANSFORM_DISALLOW_LIST", default_value = "")]
   pub transform_disallow_list: String,
 
-  /// URL alias definitions: name=https://base.url,name2=https://other.url; enables name:/path scheme in requests [env: PREVIEWPROXY_URL_ALIASES]
-  #[arg(long, env = "PREVIEWPROXY_URL_ALIASES", default_value = "")]
+  /// URL alias definitions: name=https://base.url,name2=https://other.url; enables name:/path scheme in requests [env: PP_URL_ALIASES]
+  #[arg(long, env = "PP_URL_ALIASES", default_value = "")]
   pub url_aliases: String,
 
-  /// Max in-flight requests before returning 503 [env: PREVIEWPROXY_MAX_CONCURRENT_REQUESTS]
+  /// Max in-flight requests before returning 503 [env: PP_MAX_CONCURRENT_REQUESTS]
   #[arg(
     long,
-    env = "PREVIEWPROXY_MAX_CONCURRENT_REQUESTS",
+    env = "PP_MAX_CONCURRENT_REQUESTS",
     default_value_t = 256
   )]
   pub max_concurrent_requests: u32,
@@ -142,78 +142,78 @@ pub struct Cli {
   )]
   pub rust_log: String,
 
-  /// Hex-encoded AES key for encrypting/decrypting source URLs (leave empty to disable) [env: PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY]
-  #[arg(long, env = "PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY")]
+  /// Hex-encoded AES key for encrypting/decrypting source URLs (leave empty to disable) [env: PP_SOURCE_URL_ENCRYPTION_KEY]
+  #[arg(long, env = "PP_SOURCE_URL_ENCRYPTION_KEY")]
   pub source_url_encryption_key: Option<String>,
 
-  /// Enable S3 as an image source [env: PREVIEWPROXY_S3_ENABLED]
-  #[arg(long, env = "PREVIEWPROXY_S3_ENABLED", default_value_t = false)]
+  /// Enable S3 as an image source [env: PP_S3_ENABLED]
+  #[arg(long, env = "PP_S3_ENABLED", default_value_t = false)]
   pub s3_enabled: bool,
 
-  /// S3 bucket name [env: PREVIEWPROXY_S3_BUCKET]
-  #[arg(long, env = "PREVIEWPROXY_S3_BUCKET", default_value = "")]
+  /// S3 bucket name [env: PP_S3_BUCKET]
+  #[arg(long, env = "PP_S3_BUCKET", default_value = "")]
   pub s3_bucket: String,
 
-  /// S3 region [env: PREVIEWPROXY_S3_REGION]
-  #[arg(long, env = "PREVIEWPROXY_S3_REGION", default_value = "us-east-1")]
+  /// S3 region [env: PP_S3_REGION]
+  #[arg(long, env = "PP_S3_REGION", default_value = "us-east-1")]
   pub s3_region: String,
 
-  /// S3 access key ID [env: PREVIEWPROXY_S3_ACCESS_KEY_ID]
-  #[arg(long, env = "PREVIEWPROXY_S3_ACCESS_KEY_ID", default_value = "")]
+  /// S3 access key ID [env: PP_S3_ACCESS_KEY_ID]
+  #[arg(long, env = "PP_S3_ACCESS_KEY_ID", default_value = "")]
   pub s3_access_key_id: String,
 
-  /// S3 secret access key [env: PREVIEWPROXY_S3_SECRET_ACCESS_KEY]
-  #[arg(long, env = "PREVIEWPROXY_S3_SECRET_ACCESS_KEY", default_value = "")]
+  /// S3 secret access key [env: PP_S3_SECRET_ACCESS_KEY]
+  #[arg(long, env = "PP_S3_SECRET_ACCESS_KEY", default_value = "")]
   pub s3_secret_access_key: String,
 
-  /// S3 custom endpoint URL (leave empty for AWS) [env: PREVIEWPROXY_S3_ENDPOINT]
-  #[arg(long, env = "PREVIEWPROXY_S3_ENDPOINT", default_value = "")]
+  /// S3 custom endpoint URL (leave empty for AWS) [env: PP_S3_ENDPOINT]
+  #[arg(long, env = "PP_S3_ENDPOINT", default_value = "")]
   pub s3_endpoint: String,
 
-  /// Enable serving images from the local filesystem [env: PREVIEWPROXY_LOCAL_ENABLED]
-  #[arg(long, env = "PREVIEWPROXY_LOCAL_ENABLED", default_value_t = false)]
+  /// Enable serving images from the local filesystem [env: PP_LOCAL_ENABLED]
+  #[arg(long, env = "PP_LOCAL_ENABLED", default_value_t = false)]
   pub local_enabled: bool,
 
-  /// Absolute path to root directory for local image files [env: PREVIEWPROXY_LOCAL_BASE_DIR]
-  #[arg(long, env = "PREVIEWPROXY_LOCAL_BASE_DIR", default_value = "")]
+  /// Absolute path to root directory for local image files [env: PP_LOCAL_BASE_DIR]
+  #[arg(long, env = "PP_LOCAL_BASE_DIR", default_value = "")]
   pub local_base_dir: String,
 
-  /// Edge density threshold (0-100) for best-format complexity classification [env: PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD]
+  /// Edge density threshold (0-100) for best-format complexity classification [env: PP_BEST_FORMAT_COMPLEXITY_THRESHOLD]
   #[arg(
     long,
-    env = "PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD",
+    env = "PP_BEST_FORMAT_COMPLEXITY_THRESHOLD",
     default_value_t = 5.5
   )]
   pub best_format_complexity_threshold: f64,
 
-  /// Max resolution in megapixels before skipping multi-format trial (leave empty to always trial) [env: PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION]
+  /// Max resolution in megapixels before skipping multi-format trial (leave empty to always trial) [env: PP_BEST_FORMAT_MAX_RESOLUTION]
   #[arg(
     long,
-    env = "PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION",
+    env = "PP_BEST_FORMAT_MAX_RESOLUTION",
     default_value = ""
   )]
   pub best_format_max_resolution: String,
 
-  /// Apply best-format selection for all requests that don't specify a format [env: PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT]
+  /// Apply best-format selection for all requests that don't specify a format [env: PP_BEST_FORMAT_BY_DEFAULT]
   #[arg(
     long,
-    env = "PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT",
+    env = "PP_BEST_FORMAT_BY_DEFAULT",
     default_value_t = false
   )]
   pub best_format_by_default: bool,
 
-  /// Skip re-encoding if selected best format matches source format and no transforms applied [env: PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS]
+  /// Skip re-encoding if selected best format matches source format and no transforms applied [env: PP_BEST_FORMAT_ALLOW_SKIPS]
   #[arg(
     long,
-    env = "PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS",
+    env = "PP_BEST_FORMAT_ALLOW_SKIPS",
     default_value_t = false
   )]
   pub best_format_allow_skips: bool,
 
-  /// Comma-separated formats to trial for best-format selection [env: PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS]
+  /// Comma-separated formats to trial for best-format selection [env: PP_BEST_FORMAT_PREFERRED_FORMATS]
   #[arg(
     long,
-    env = "PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS",
+    env = "PP_BEST_FORMAT_PREFERRED_FORMATS",
     default_value = "jpeg,webp,png"
   )]
   pub best_format_preferred_formats: String,
@@ -225,97 +225,97 @@ pub struct Cli {
 impl Cli {
   pub fn apply_to_env(&self) {
     unsafe {
-      std::env::set_var("PREVIEWPROXY_PORT", self.port.to_string());
-      std::env::set_var("PREVIEWPROXY_APP_ENV", &self.env);
+      std::env::set_var("PP_PORT", self.port.to_string());
+      std::env::set_var("PP_APP_ENV", &self.env);
       std::env::set_var(
-        "PREVIEWPROXY_HMAC_KEY",
+        "PP_HMAC_KEY",
         self.hmac_key.as_deref().unwrap_or(""),
       );
-      std::env::set_var("PREVIEWPROXY_ALLOWED_HOSTS", &self.allowed_hosts);
+      std::env::set_var("PP_ALLOWED_HOSTS", &self.allowed_hosts);
       std::env::set_var(
-        "PREVIEWPROXY_FETCH_TIMEOUT_SECS",
+        "PP_FETCH_TIMEOUT_SECS",
         self.fetch_timeout_secs.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_MAX_SOURCE_BYTES",
+        "PP_MAX_SOURCE_BYTES",
         self.max_source_bytes.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_CACHE_MEMORY_MAX_MB",
+        "PP_CACHE_MEMORY_MAX_MB",
         self.cache_memory_max_mb.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_CACHE_MEMORY_TTL_SECS",
+        "PP_CACHE_MEMORY_TTL_SECS",
         self.cache_memory_ttl_secs.to_string(),
       );
-      std::env::set_var("PREVIEWPROXY_CACHE_DIR", &self.cache_dir);
+      std::env::set_var("PP_CACHE_DIR", &self.cache_dir);
       std::env::set_var(
-        "PREVIEWPROXY_CACHE_DISK_TTL_SECS",
+        "PP_CACHE_DISK_TTL_SECS",
         self.cache_disk_ttl_secs.to_string(),
       );
-      std::env::set_var("PREVIEWPROXY_CACHE_DISK_MAX_MB", &self.cache_disk_max_mb);
+      std::env::set_var("PP_CACHE_DISK_MAX_MB", &self.cache_disk_max_mb);
       std::env::set_var(
-        "PREVIEWPROXY_CACHE_CLEANUP_INTERVAL_SECS",
+        "PP_CACHE_CLEANUP_INTERVAL_SECS",
         self.cache_cleanup_interval_secs.to_string(),
       );
-      std::env::set_var("PREVIEWPROXY_FFMPEG_PATH", &self.ffmpeg_path);
-      std::env::set_var("PREVIEWPROXY_FFPROBE_PATH", &self.ffprobe_path);
-      std::env::set_var("PREVIEWPROXY_CORS_ALLOW_ORIGIN", &self.cors_allow_origin);
+      std::env::set_var("PP_FFMPEG_PATH", &self.ffmpeg_path);
+      std::env::set_var("PP_FFPROBE_PATH", &self.ffprobe_path);
+      std::env::set_var("PP_CORS_ALLOW_ORIGIN", &self.cors_allow_origin);
       std::env::set_var(
-        "PREVIEWPROXY_CORS_MAX_AGE_SECS",
+        "PP_CORS_MAX_AGE_SECS",
         self.cors_max_age_secs.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_INPUT_DISALLOW_LIST",
+        "PP_INPUT_DISALLOW_LIST",
         &self.input_disallow_list,
       );
       std::env::set_var(
-        "PREVIEWPROXY_OUTPUT_DISALLOW_LIST",
+        "PP_OUTPUT_DISALLOW_LIST",
         &self.output_disallow_list,
       );
       std::env::set_var(
-        "PREVIEWPROXY_TRANSFORM_DISALLOW_LIST",
+        "PP_TRANSFORM_DISALLOW_LIST",
         &self.transform_disallow_list,
       );
-      std::env::set_var("PREVIEWPROXY_URL_ALIASES", &self.url_aliases);
+      std::env::set_var("PP_URL_ALIASES", &self.url_aliases);
       std::env::set_var(
-        "PREVIEWPROXY_MAX_CONCURRENT_REQUESTS",
+        "PP_MAX_CONCURRENT_REQUESTS",
         self.max_concurrent_requests.to_string(),
       );
       std::env::set_var("RUST_LOG", &self.rust_log);
       std::env::set_var(
-        "PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY",
+        "PP_SOURCE_URL_ENCRYPTION_KEY",
         self.source_url_encryption_key.as_deref().unwrap_or(""),
       );
-      std::env::set_var("PREVIEWPROXY_S3_ENABLED", self.s3_enabled.to_string());
-      std::env::set_var("PREVIEWPROXY_S3_BUCKET", &self.s3_bucket);
-      std::env::set_var("PREVIEWPROXY_S3_REGION", &self.s3_region);
-      std::env::set_var("PREVIEWPROXY_S3_ACCESS_KEY_ID", &self.s3_access_key_id);
+      std::env::set_var("PP_S3_ENABLED", self.s3_enabled.to_string());
+      std::env::set_var("PP_S3_BUCKET", &self.s3_bucket);
+      std::env::set_var("PP_S3_REGION", &self.s3_region);
+      std::env::set_var("PP_S3_ACCESS_KEY_ID", &self.s3_access_key_id);
       std::env::set_var(
-        "PREVIEWPROXY_S3_SECRET_ACCESS_KEY",
+        "PP_S3_SECRET_ACCESS_KEY",
         &self.s3_secret_access_key,
       );
-      std::env::set_var("PREVIEWPROXY_S3_ENDPOINT", &self.s3_endpoint);
-      std::env::set_var("PREVIEWPROXY_LOCAL_ENABLED", self.local_enabled.to_string());
-      std::env::set_var("PREVIEWPROXY_LOCAL_BASE_DIR", &self.local_base_dir);
+      std::env::set_var("PP_S3_ENDPOINT", &self.s3_endpoint);
+      std::env::set_var("PP_LOCAL_ENABLED", self.local_enabled.to_string());
+      std::env::set_var("PP_LOCAL_BASE_DIR", &self.local_base_dir);
       std::env::set_var(
-        "PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD",
+        "PP_BEST_FORMAT_COMPLEXITY_THRESHOLD",
         self.best_format_complexity_threshold.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION",
+        "PP_BEST_FORMAT_MAX_RESOLUTION",
         &self.best_format_max_resolution,
       );
       std::env::set_var(
-        "PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT",
+        "PP_BEST_FORMAT_BY_DEFAULT",
         self.best_format_by_default.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS",
+        "PP_BEST_FORMAT_ALLOW_SKIPS",
         self.best_format_allow_skips.to_string(),
       );
       std::env::set_var(
-        "PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS",
+        "PP_BEST_FORMAT_PREFERRED_FORMATS",
         &self.best_format_preferred_formats,
       );
     }
@@ -335,7 +335,7 @@ mod tests {
   #[test]
   fn test_max_concurrent_requests_default() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS") };
+    unsafe { std::env::remove_var("PP_MAX_CONCURRENT_REQUESTS") };
     let cli = Cli::parse_from(base_args());
     assert_eq!(cli.max_concurrent_requests, 256);
   }
@@ -357,7 +357,7 @@ mod tests {
   #[test]
   fn test_source_url_encryption_key_absent() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY") };
+    unsafe { std::env::remove_var("PP_SOURCE_URL_ENCRYPTION_KEY") };
     let cli = Cli::parse_from(base_args());
     assert!(cli.source_url_encryption_key.is_none());
   }
@@ -372,12 +372,12 @@ mod tests {
   fn test_s3_defaults() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     unsafe {
-      std::env::remove_var("PREVIEWPROXY_S3_ENABLED");
-      std::env::remove_var("PREVIEWPROXY_S3_BUCKET");
-      std::env::remove_var("PREVIEWPROXY_S3_REGION");
-      std::env::remove_var("PREVIEWPROXY_S3_ACCESS_KEY_ID");
-      std::env::remove_var("PREVIEWPROXY_S3_SECRET_ACCESS_KEY");
-      std::env::remove_var("PREVIEWPROXY_S3_ENDPOINT");
+      std::env::remove_var("PP_S3_ENABLED");
+      std::env::remove_var("PP_S3_BUCKET");
+      std::env::remove_var("PP_S3_REGION");
+      std::env::remove_var("PP_S3_ACCESS_KEY_ID");
+      std::env::remove_var("PP_S3_SECRET_ACCESS_KEY");
+      std::env::remove_var("PP_S3_ENDPOINT");
     }
     let cli = Cli::parse_from(base_args());
     assert!(!cli.s3_enabled);
@@ -416,8 +416,8 @@ mod tests {
   fn test_local_defaults() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     unsafe {
-      std::env::remove_var("PREVIEWPROXY_LOCAL_ENABLED");
-      std::env::remove_var("PREVIEWPROXY_LOCAL_BASE_DIR");
+      std::env::remove_var("PP_LOCAL_ENABLED");
+      std::env::remove_var("PP_LOCAL_BASE_DIR");
     }
     let cli = Cli::parse_from(base_args());
     assert!(!cli.local_enabled);
@@ -440,11 +440,11 @@ mod tests {
   fn test_best_format_defaults() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     unsafe {
-      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_COMPLEXITY_THRESHOLD");
-      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_MAX_RESOLUTION");
-      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT");
-      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_ALLOW_SKIPS");
-      std::env::remove_var("PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS");
+      std::env::remove_var("PP_BEST_FORMAT_COMPLEXITY_THRESHOLD");
+      std::env::remove_var("PP_BEST_FORMAT_MAX_RESOLUTION");
+      std::env::remove_var("PP_BEST_FORMAT_BY_DEFAULT");
+      std::env::remove_var("PP_BEST_FORMAT_ALLOW_SKIPS");
+      std::env::remove_var("PP_BEST_FORMAT_PREFERRED_FORMATS");
     }
     let cli = Cli::parse_from(base_args());
     assert!((cli.best_format_complexity_threshold - 5.5).abs() < f64::EPSILON);
@@ -495,29 +495,29 @@ mod tests {
     ]);
     cli.apply_to_env();
     assert_eq!(
-      std::env::var("PREVIEWPROXY_MAX_CONCURRENT_REQUESTS").unwrap(),
+      std::env::var("PP_MAX_CONCURRENT_REQUESTS").unwrap(),
       "128"
     );
-    assert_eq!(std::env::var("PREVIEWPROXY_S3_ENABLED").unwrap(), "true");
+    assert_eq!(std::env::var("PP_S3_ENABLED").unwrap(), "true");
     assert_eq!(
-      std::env::var("PREVIEWPROXY_S3_BUCKET").unwrap(),
+      std::env::var("PP_S3_BUCKET").unwrap(),
       "testbucket"
     );
-    assert_eq!(std::env::var("PREVIEWPROXY_LOCAL_ENABLED").unwrap(), "true");
+    assert_eq!(std::env::var("PP_LOCAL_ENABLED").unwrap(), "true");
     assert_eq!(
-      std::env::var("PREVIEWPROXY_LOCAL_BASE_DIR").unwrap(),
+      std::env::var("PP_LOCAL_BASE_DIR").unwrap(),
       "/srv/images"
     );
     assert_eq!(
-      std::env::var("PREVIEWPROXY_BEST_FORMAT_BY_DEFAULT").unwrap(),
+      std::env::var("PP_BEST_FORMAT_BY_DEFAULT").unwrap(),
       "true"
     );
     assert_eq!(
-      std::env::var("PREVIEWPROXY_BEST_FORMAT_PREFERRED_FORMATS").unwrap(),
+      std::env::var("PP_BEST_FORMAT_PREFERRED_FORMATS").unwrap(),
       "webp,avif"
     );
     assert_eq!(
-      std::env::var("PREVIEWPROXY_SOURCE_URL_ENCRYPTION_KEY").unwrap(),
+      std::env::var("PP_SOURCE_URL_ENCRYPTION_KEY").unwrap(),
       "hexkey"
     );
   }

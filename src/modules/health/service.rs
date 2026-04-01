@@ -1,16 +1,20 @@
 use crate::modules::health::dto::HealthResponse;
+use tracing::info;
 
+#[tracing::instrument]
 pub async fn index(
   cache_memory_items: u64,
   cache_disk_bytes: u64,
   cache_disk_bytes_as_of: u64,
 ) -> HealthResponse {
-  HealthResponse {
+  let response = HealthResponse {
     status: "ok".to_string(),
     cache_memory_items,
     cache_disk_bytes,
     cache_disk_bytes_as_of,
-  }
+  };
+  info!(status = %response.status, "health check result");
+  response
 }
 
 #[cfg(test)]

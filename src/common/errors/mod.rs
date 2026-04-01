@@ -5,7 +5,7 @@ use axum::{
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Error, Debug, Clone)]
 pub enum ProxyError {
@@ -59,7 +59,13 @@ impl IntoResponse for ProxyError {
     let msg = self.to_string();
     match &self {
       ProxyError::InternalError(detail) => error!("internal_error: {}", detail),
-      _ => error!("{}", msg),
+      ProxyError::UpstreamTimeout
+      | ProxyError::TooManyRedirects
+      | ProxyError::WatermarkFetchFailed
+      | ProxyError::HeicDecodeError
+      | ProxyError::PdfRenderError
+      | ProxyError::VideoDecodeError => error!("{}", msg),
+      _ => warn!("{}", msg),
     };
     let status = match &self {
       ProxyError::UpstreamNotFound => StatusCode::NOT_FOUND,

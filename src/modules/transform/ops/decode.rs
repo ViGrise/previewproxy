@@ -2,7 +2,13 @@ use crate::common::errors::ProxyError;
 use image::DynamicImage;
 use std::io::Cursor;
 
+#[tracing::instrument(skip(bytes), fields(input_bytes = bytes.len()))]
 pub fn dispatch(mime: &str, bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
+  tracing::debug!(
+    detected_format = mime,
+    input_bytes = bytes.len(),
+    "decode: dispatching"
+  );
   match mime {
     "image/svg+xml" => decode_svg(bytes),
     "image/vnd.adobe.photoshop" | "image/x-photoshop" => decode_psd(bytes),
