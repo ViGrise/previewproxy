@@ -52,7 +52,10 @@ impl FallbackImage {
       (raw, ct)
     };
 
-    Some(Arc::new(FallbackImage { bytes, content_type }))
+    Some(Arc::new(FallbackImage {
+      bytes,
+      content_type,
+    }))
   }
 }
 
@@ -79,7 +82,7 @@ mod tests {
   use base64::Engine;
 
   fn base_cfg() -> Configuration {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
     use std::net::{Ipv4Addr, SocketAddr};
     Configuration {
       env: crate::common::config::Environment::Development,
@@ -129,7 +132,9 @@ mod tests {
   const PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==";
 
   fn png_bytes() -> Vec<u8> {
-    base64::engine::general_purpose::STANDARD.decode(PNG_B64).unwrap()
+    base64::engine::general_purpose::STANDARD
+      .decode(PNG_B64)
+      .unwrap()
   }
 
   #[tokio::test]

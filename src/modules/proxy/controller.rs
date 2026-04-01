@@ -1,9 +1,9 @@
 use crate::common::config::Config;
 use crate::common::errors::ProxyError;
-use crate::modules::proxy::fallback::FallbackImage;
 use crate::modules::AppState;
 use crate::modules::cache::manager::CacheHit;
 use crate::modules::cache::memory::CacheEntry;
+use crate::modules::proxy::fallback::FallbackImage;
 use crate::modules::proxy::{
   dto::{
     ProcessResult,
@@ -67,14 +67,22 @@ async fn handle_query(
         axum::body::Body::empty(),
       )
         .into_response();
-      state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+      state
+        .metrics
+        .status_codes_total
+        .with_label_values(&[resp.status().as_str()])
+        .inc();
       return resp;
     }
   };
   let resp = handle_query_inner(state.clone(), query, permit, queued_at)
     .await
     .unwrap_or_else(|e| e.into_response());
-  state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+  state
+    .metrics
+    .status_codes_total
+    .with_label_values(&[resp.status().as_str()])
+    .inc();
   resp
 }
 
@@ -106,14 +114,22 @@ async fn handle_path(
         axum::body::Body::empty(),
       )
         .into_response();
-      state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+      state
+        .metrics
+        .status_codes_total
+        .with_label_values(&[resp.status().as_str()])
+        .inc();
       return resp;
     }
   };
   let resp = handle_path_inner(state.clone(), path, query, permit, queued_at)
     .await
     .unwrap_or_else(|e| e.into_response());
-  state.metrics.status_codes_total.with_label_values(&[resp.status().as_str()]).inc();
+  state
+    .metrics
+    .status_codes_total
+    .with_label_values(&[resp.status().as_str()])
+    .inc();
   resp
 }
 
@@ -275,13 +291,13 @@ fn build_cached_response(entry: CacheEntry, hit: CacheHit, cfg: &Config) -> Resp
 
 #[cfg(test)]
 mod concurrency_tests {
-  use base64::Engine;
   use crate::common::config::Configuration;
   use crate::modules::AppState;
   use crate::modules::cache::manager::CacheManager;
   use crate::modules::proxy::sources::http::HttpFetcher;
   use crate::modules::security::allowlist::Allowlist;
   use axum::http::StatusCode;
+  use base64::Engine;
   use std::net::{Ipv4Addr, SocketAddr};
   use std::sync::Arc;
   use tokio::sync::Semaphore;
@@ -537,7 +553,10 @@ mod concurrency_tests {
     );
   }
 
-  fn make_state_with_fallback(permits: usize, fallback: Option<Arc<crate::modules::proxy::fallback::FallbackImage>>) -> AppState {
+  fn make_state_with_fallback(
+    permits: usize,
+    fallback: Option<Arc<crate::modules::proxy::fallback::FallbackImage>>,
+  ) -> AppState {
     AppState {
       fallback,
       ..make_state(permits)
@@ -573,7 +592,10 @@ mod concurrency_tests {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     assert_eq!(
-      resp.headers().get("x-fallback").and_then(|v| v.to_str().ok()),
+      resp
+        .headers()
+        .get("x-fallback")
+        .and_then(|v| v.to_str().ok()),
       Some("true")
     );
     let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -637,7 +659,10 @@ mod concurrency_tests {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
     assert_eq!(
-      resp.headers().get("x-fallback").and_then(|v| v.to_str().ok()),
+      resp
+        .headers()
+        .get("x-fallback")
+        .and_then(|v| v.to_str().ok()),
       Some("true")
     );
   }
@@ -703,7 +728,10 @@ mod concurrency_tests {
       .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
-      resp.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+      resp
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok()),
       Some("public, max-age=300")
     );
   }
@@ -743,7 +771,10 @@ mod concurrency_tests {
       .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
-      resp.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+      resp
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok()),
       Some("public, max-age=1234")
     );
   }

@@ -267,6 +267,7 @@ impl Configuration {
       env,
       listen_address,
       app_port,
+      ttl: env_var_u64("PP_TTL", 86400),
       hmac_key: env_var_opt("PP_HMAC_KEY"),
       source_url_encryption_key: env_var_opt("PP_SOURCE_URL_ENCRYPTION_KEY")
         .map(|s| parse_hex_key("PP_SOURCE_URL_ENCRYPTION_KEY", &s)),
@@ -275,29 +276,25 @@ impl Configuration {
       max_source_bytes: env_var_u64("PP_MAX_SOURCE_BYTES", 20_971_520),
       cache_memory_max_mb: env_var_u64("PP_CACHE_MEMORY_MAX_MB", 256),
       cache_memory_ttl_secs: env_var_u64("PP_CACHE_MEMORY_TTL_SECS", 3600),
-      cache_dir: std::env::var("PP_CACHE_DIR")
-        .unwrap_or_else(|_| "/tmp/previewproxy".to_string()),
+      cache_dir: std::env::var("PP_CACHE_DIR").unwrap_or_else(|_| "/tmp/previewproxy".to_string()),
       cache_disk_ttl_secs: env_var_u64("PP_CACHE_DISK_TTL_SECS", 86400),
       cache_disk_max_mb: env_var_opt("PP_CACHE_DISK_MAX_MB").and_then(|v| v.parse().ok()),
       cache_cleanup_interval_secs: env_var_u64("PP_CACHE_CLEANUP_INTERVAL_SECS", 600),
       s3_enabled: env_var_bool("PP_S3_ENABLED"),
       s3_bucket: env_var_opt("PP_S3_BUCKET"),
-      s3_region: std::env::var("PP_S3_REGION")
-        .unwrap_or_else(|_| "us-east-1".to_string()),
+      s3_region: std::env::var("PP_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
       s3_access_key_id: env_var_opt("PP_S3_ACCESS_KEY_ID"),
       s3_secret_access_key: env_var_opt("PP_S3_SECRET_ACCESS_KEY"),
       s3_endpoint: env_var_opt("PP_S3_ENDPOINT"),
       local_enabled: env_var_bool("PP_LOCAL_ENABLED"),
       local_base_dir: env_var_opt("PP_LOCAL_BASE_DIR"),
-      ffmpeg_path: std::env::var("PP_FFMPEG_PATH")
-        .unwrap_or_else(|_| "ffmpeg".to_string()),
+      ffmpeg_path: std::env::var("PP_FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string()),
       ffprobe_path: {
         let explicit = std::env::var("PP_FFPROBE_PATH").unwrap_or_default();
         if !explicit.is_empty() {
           explicit
         } else {
-          let ffmpeg =
-            std::env::var("PP_FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
+          let ffmpeg = std::env::var("PP_FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
           let path = std::path::Path::new(&ffmpeg);
           match path.parent() {
             Some(dir) if dir != std::path::Path::new("") => {
@@ -331,16 +328,13 @@ impl Configuration {
       transform_disallow: parse_transform_disallow(
         &std::env::var("PP_TRANSFORM_DISALLOW_LIST").unwrap_or_default(),
       ),
-      url_aliases: parse_url_aliases(
-        &std::env::var("PP_URL_ALIASES").unwrap_or_default(),
-      ),
+      url_aliases: parse_url_aliases(&std::env::var("PP_URL_ALIASES").unwrap_or_default()),
       best_format: BestFormatConfig {
         complexity_threshold: std::env::var("PP_BEST_FORMAT_COMPLEXITY_THRESHOLD")
           .ok()
           .and_then(|v| v.parse().ok())
           .unwrap_or(5.5),
-        max_resolution: env_var_opt("PP_BEST_FORMAT_MAX_RESOLUTION")
-          .and_then(|v| v.parse().ok()),
+        max_resolution: env_var_opt("PP_BEST_FORMAT_MAX_RESOLUTION").and_then(|v| v.parse().ok()),
         by_default: env_var_bool("PP_BEST_FORMAT_BY_DEFAULT"),
         allow_skips: env_var_bool("PP_BEST_FORMAT_ALLOW_SKIPS"),
         preferred_formats: parse_preferred_formats(
@@ -354,7 +348,6 @@ impl Configuration {
       fallback_image_ttl: env_var_opt("PP_FALLBACK_IMAGE_TTL")
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|&v| v > 0),
-      ttl: env_var_u64("PP_TTL", 86400),
     });
     if cfg.hmac_key.is_none() {
       tracing::warn!("HMAC_KEY is not set - all requests are unauthenticated");
@@ -478,7 +471,10 @@ impl std::fmt::Debug for Configuration {
         }),
       )
       .field("best_format", &self.best_format)
-      .field("fallback_image_data", &self.fallback_image_data.as_ref().map(|_| "[set]"))
+      .field(
+        "fallback_image_data",
+        &self.fallback_image_data.as_ref().map(|_| "[set]"),
+      )
       .field("fallback_image_path", &self.fallback_image_path)
       .field("fallback_image_url", &self.fallback_image_url)
       .field("fallback_image_http_code", &self.fallback_image_http_code)
@@ -865,8 +861,14 @@ mod tests {
       std::env::remove_var("PP_TTL");
     }
     assert_eq!(cfg.fallback_image_data.as_deref(), Some("aGVsbG8="));
-    assert_eq!(cfg.fallback_image_path.as_deref(), Some("/tmp/fallback.png"));
-    assert_eq!(cfg.fallback_image_url.as_deref(), Some("https://example.com/fallback.png"));
+    assert_eq!(
+      cfg.fallback_image_path.as_deref(),
+      Some("/tmp/fallback.png")
+    );
+    assert_eq!(
+      cfg.fallback_image_url.as_deref(),
+      Some("https://example.com/fallback.png")
+    );
     assert_eq!(cfg.fallback_image_http_code, 0);
     assert_eq!(cfg.fallback_image_ttl, Some(300));
     assert_eq!(cfg.ttl, 7200);
