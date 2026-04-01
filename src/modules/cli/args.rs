@@ -218,6 +218,14 @@ pub struct Cli {
   )]
   pub best_format_preferred_formats: String,
 
+  /// Address to expose Prometheus metrics (e.g. :9464); leave empty to disable [env: PP_PROMETHEUS_BIND]
+  #[arg(long, env = "PP_PROMETHEUS_BIND", default_value = "")]
+  pub prometheus_bind: String,
+
+  /// Prefix for all Prometheus metric names [env: PP_PROMETHEUS_NAMESPACE]
+  #[arg(long, env = "PP_PROMETHEUS_NAMESPACE", default_value = "")]
+  pub prometheus_namespace: String,
+
   #[command(subcommand)]
   pub command: Option<Commands>,
 }
@@ -318,6 +326,8 @@ impl Cli {
         "PP_BEST_FORMAT_PREFERRED_FORMATS",
         &self.best_format_preferred_formats,
       );
+      std::env::set_var("PP_PROMETHEUS_BIND", &self.prometheus_bind);
+      std::env::set_var("PP_PROMETHEUS_NAMESPACE", &self.prometheus_namespace);
     }
   }
 }
