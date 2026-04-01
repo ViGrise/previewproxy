@@ -25,3 +25,74 @@ pub async fn handle_metrics(State(metrics): State<Arc<Metrics>>) -> Response {
       .into_response(),
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::modules::metrics::Metrics;
+  use axum::http::StatusCode;
+  use tower::ServiceExt;
+
+  #[tokio::test]
+  async fn test_metrics_endpoint_returns_200_with_text_plain() {
+    let metrics = Metrics::new("");
+    metrics.requests_total.inc();
+
+    let app = crate::modules::metrics::prometheus::router(metrics);
+    let req = axum::http::Request::builder()
+      .uri("/metrics")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+      .headers()
+      .get("content-type")
+      .and_then(|v| v.to_str().ok())
+      .unwrap_or("");
+    assert!(ct.contains("text/plain"), "content-type should be text/plain, got: {ct}");
+  }
+
+  #[tokio::test]
+  async fn test_metrics_endpoint_contains_requests_total() {
+    use http_body_util::BodyExt;
+
+    let metrics = Metrics::new("");
+    metrics.requests_total.inc();
+    metrics.requests_total.inc();
+
+    let app = crate::modules::metrics::prometheus::router(metrics);
+    let req = axum::http::Request::builder()
+      .uri("/metrics")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = std::str::from_utf8(&body).unwrap();
+    assert!(
+      text.contains("requests_total 2"),
+      "expected requests_total 2 in output:\n{text}"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_metrics_namespace_prefix() {
+    use http_body_util::BodyExt;
+
+    let metrics = Metrics::new("myapp");
+    metrics.requests_total.inc();
+
+    let app = crate::modules::metrics::prometheus::router(metrics);
+    let req = axum::http::Request::builder()
+      .uri("/metrics")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = std::str::from_utf8(&body).unwrap();
+    assert!(
+      text.contains("myapp_requests_total"),
+      "expected myapp_requests_total in output:\n{text}"
+    );
+  }
+}
