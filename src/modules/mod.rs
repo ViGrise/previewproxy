@@ -10,6 +10,7 @@ use crate::common::config::Config;
 use crate::modules::cache::manager::CacheManager;
 use crate::modules::metrics::Metrics;
 use crate::modules::proxy::fetchable::Fetchable;
+use crate::modules::proxy::fallback::FallbackImage;
 use axum::Router;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -22,6 +23,7 @@ pub struct AppState {
   pub http_fetcher: Arc<crate::modules::proxy::sources::http::HttpFetcher>,
   pub concurrency: Arc<Semaphore>,
   pub metrics: Arc<Metrics>,
+  pub fallback: Option<Arc<FallbackImage>>,
 }
 
 pub fn router(state: AppState) -> Router {

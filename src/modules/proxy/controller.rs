@@ -289,6 +289,7 @@ mod concurrency_tests {
       concurrency: Arc::new(Semaphore::new(permits)),
       cfg,
       metrics,
+      fallback: None,
     }
   }
 
@@ -300,6 +301,12 @@ mod concurrency_tests {
       cfg: std::sync::Arc::new(cfg),
       ..base
     }
+  }
+
+  #[tokio::test]
+  async fn test_appstate_has_fallback_none_by_default() {
+    let state = make_state(1);
+    assert!(state.fallback.is_none());
   }
 
   #[tokio::test]
