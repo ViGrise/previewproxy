@@ -15,8 +15,10 @@ pub fn run(
   wm_spec: Option<WatermarkSpec>,
 ) -> Result<Vec<u8>, ProxyError> {
   // Decode all frames
+  tracing::debug!("Decoding GIF animation frames");
   let decoder = GifDecoder::new(Cursor::new(src_bytes))
     .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+  tracing::trace!("Collecting frames from GIF decoder");
   let frames: Vec<Frame> = decoder
     .into_frames()
     .collect_frames()
@@ -120,10 +122,15 @@ pub fn run(
   let mut buf = Cursor::new(Vec::new());
   {
     let mut encoder = GifEncoder::new(&mut buf);
+    tracing::trace!("Setting GIF encoder to infinite repeat");
     encoder
       .set_repeat(Repeat::Infinite)
       .map_err(|e| ProxyError::InternalError(e.to_string()))?;
     for frame in out_frames {
+      tracing::trace!(
+        "Encoding frame with delay {} ms",
+        frame.delay().numer_denom_ms().0
+      );
       encoder
         .encode_frame(frame)
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;

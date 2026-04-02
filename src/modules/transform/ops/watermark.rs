@@ -124,6 +124,7 @@ fn apply_image_watermark(
   let base_w = base.width();
   let base_h = base.height();
 
+  tracing::trace!("Decoding watermark image data");
   let wm_src = image::ImageReader::new(std::io::Cursor::new(bytes))
     .with_guessed_format()
     .map_err(|e| ProxyError::InternalError(e.to_string()))?
@@ -219,6 +220,7 @@ fn load_font(font_name: &str) -> Result<FontArc, ProxyError> {
       .map_err(|e| ProxyError::InternalError(format!("default font load failed: {e}")));
   }
   if font_name.is_empty() || font_name.eq_ignore_ascii_case("sans") {
+    tracing::trace!("Using default sans font since font name is empty or 'sans'");
     return FontArc::try_from_slice(DEFAULT_FONT_BYTES)
       .map_err(|e| ProxyError::InternalError(format!("default font load failed: {e}")));
   }
@@ -409,16 +411,6 @@ mod type_check {
 mod tests {
   use super::*;
   use crate::modules::transform::test_helpers::tiny_png_bytes;
-  use image::ImageReader;
-  use std::io::Cursor;
-
-  fn load_tiny() -> DynamicImage {
-    ImageReader::new(Cursor::new(tiny_png_bytes()))
-      .with_guessed_format()
-      .unwrap()
-      .decode()
-      .unwrap()
-  }
 
   #[test]
   fn image_watermark_preserves_base_dimensions() {
