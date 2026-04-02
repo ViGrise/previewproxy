@@ -16,34 +16,44 @@ pub struct WatermarkPlacement {
 
 #[derive(Debug, Clone)]
 pub enum WmPosition {
-  Ce,
-  No,
-  So,
-  Ea,
-  We,
-  NoEa,
-  NoWe,
-  SoEa,
-  SoWe,
-  Re,
+  Center,
+  Top,
+  Bottom,
+  Right,
+  Left,
+  TopRight,
+  TopLeft,
+  BottomRight,
+  BottomLeft,
+  Repeat,
 }
 
 impl WmPosition {
   pub fn from_str(s: &str) -> WmPosition {
     match s {
-      "ce" => WmPosition::Ce,
-      "no" => WmPosition::No,
-      "so" => WmPosition::So,
-      "ea" => WmPosition::Ea,
-      "we" => WmPosition::We,
-      "noea" => WmPosition::NoEa,
-      "nowe" => WmPosition::NoWe,
-      "soea" => WmPosition::SoEa,
-      "sowe" => WmPosition::SoWe,
-      "re" => WmPosition::Re,
+      // center
+      "ce" | "center" | "c" => WmPosition::Center,
+      // top
+      "no" | "top" | "t" | "north" => WmPosition::Top,
+      // bottom
+      "so" | "bottom" | "b" | "south" => WmPosition::Bottom,
+      // right
+      "ea" | "right" | "r" | "east" => WmPosition::Right,
+      // left
+      "we" | "left" | "l" | "west" => WmPosition::Left,
+      // top-right
+      "noea" | "top-right" | "tr" | "north_east" => WmPosition::TopRight,
+      // top-left
+      "nowe" | "top-left" | "tl" | "north_west" => WmPosition::TopLeft,
+      // bottom-right
+      "soea" | "bottom-right" | "br" | "south_east" => WmPosition::BottomRight,
+      // bottom-left
+      "sowe" | "bottom-left" | "bl" | "south_west" => WmPosition::BottomLeft,
+      // repeat/tile
+      "re" | "repeat" | "rep" => WmPosition::Repeat,
       _ => {
-        tracing::warn!(pos = s, "unknown wm_pos value, defaulting to noea");
-        WmPosition::NoEa
+        tracing::warn!(pos = s, "unknown wm_pos value, defaulting to top-right");
+        WmPosition::TopRight
       }
     }
   }
@@ -82,16 +92,16 @@ pub fn compute_single_position(
 ) -> (i32, i32) {
   let (bw, bh, ww, wh) = (base_w as i32, base_h as i32, wm_w as i32, wm_h as i32);
   let (x, y) = match pos {
-    WmPosition::Ce => ((bw - ww) / 2, (bh - wh) / 2),
-    WmPosition::No => ((bw - ww) / 2, 0),
-    WmPosition::So => ((bw - ww) / 2, bh - wh),
-    WmPosition::Ea => (bw - ww, (bh - wh) / 2),
-    WmPosition::We => (0, (bh - wh) / 2),
-    WmPosition::NoEa => (bw - ww, 0),
-    WmPosition::NoWe => (0, 0),
-    WmPosition::SoEa => (bw - ww, bh - wh),
-    WmPosition::SoWe => (0, bh - wh),
-    WmPosition::Re => (0, 0),
+    WmPosition::Center => ((bw - ww) / 2, (bh - wh) / 2),
+    WmPosition::Top => ((bw - ww) / 2, 0),
+    WmPosition::Bottom => ((bw - ww) / 2, bh - wh),
+    WmPosition::Right => (bw - ww, (bh - wh) / 2),
+    WmPosition::Left => (0, (bh - wh) / 2),
+    WmPosition::TopRight => (bw - ww, 0),
+    WmPosition::TopLeft => (0, 0),
+    WmPosition::BottomRight => (bw - ww, bh - wh),
+    WmPosition::BottomLeft => (0, bh - wh),
+    WmPosition::Repeat => (0, 0),
   };
   (x + x_off, y + y_off)
 }
@@ -147,7 +157,7 @@ fn apply_image_watermark(
   let mut base_rgba = base.to_rgba8();
 
   match placement.pos {
-    WmPosition::Re => {
+    WmPosition::Repeat => {
       tile_watermark(&mut base_rgba, &wm_rgba, placement.x, placement.y);
     }
     _ => {
@@ -322,7 +332,7 @@ fn apply_text_watermark(
   let mut base_rgba = base.to_rgba8();
 
   match placement.pos {
-    WmPosition::Re => {
+    WmPosition::Repeat => {
       tile_watermark(&mut base_rgba, &text_img, placement.x, placement.y);
     }
     _ => {
@@ -378,7 +388,7 @@ mod type_check {
   fn watermark_spec_variants_exist() {
     let _p = WatermarkPlacement {
       opacity: 1.0,
-      pos: WmPosition::NoEa,
+      pos: WmPosition::TopRight,
       x: 0,
       y: 0,
     };
@@ -387,7 +397,7 @@ mod type_check {
       scale: 0.15,
       placement: WatermarkPlacement {
         opacity: 1.0,
-        pos: WmPosition::Ce,
+        pos: WmPosition::Center,
         x: 0,
         y: 0,
       },
@@ -399,7 +409,7 @@ mod type_check {
       font: "sans".to_string(),
       placement: WatermarkPlacement {
         opacity: 1.0,
-        pos: WmPosition::SoWe,
+        pos: WmPosition::BottomLeft,
         x: 5,
         y: 5,
       },
@@ -420,7 +430,7 @@ mod tests {
       scale: 0.15,
       placement: WatermarkPlacement {
         opacity: 1.0,
-        pos: WmPosition::NoEa,
+        pos: WmPosition::TopRight,
         x: 0,
         y: 0,
       },
@@ -438,7 +448,7 @@ mod tests {
       scale: 0.1,
       placement: WatermarkPlacement {
         opacity: 1.0,
-        pos: WmPosition::Ce,
+        pos: WmPosition::Center,
         x: 0,
         y: 0,
       },
@@ -456,7 +466,7 @@ mod tests {
       scale: 0.2,
       placement: WatermarkPlacement {
         opacity: 0.5,
-        pos: WmPosition::Re,
+        pos: WmPosition::Repeat,
         x: 2,
         y: 2,
       },
@@ -468,28 +478,28 @@ mod tests {
 
   #[test]
   fn position_ce_centers_watermark() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Ce, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Center, 0, 0);
     assert_eq!(x, 40); // (100-20)/2
     assert_eq!(y, 35); // (80-10)/2
   }
 
   #[test]
   fn position_noea_top_right() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::NoEa, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::TopRight, 0, 0);
     assert_eq!(x, 80); // 100-20
     assert_eq!(y, 0);
   }
 
   #[test]
   fn position_sowe_bottom_left() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::SoWe, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::BottomLeft, 0, 0);
     assert_eq!(x, 0);
     assert_eq!(y, 70); // 80-10
   }
 
   #[test]
   fn position_offsets_applied() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::NoEa, -5, 10);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::TopRight, -5, 10);
     assert_eq!(x, 75); // 80 + (-5)
     assert_eq!(y, 10);
   }
@@ -558,7 +568,7 @@ mod tests {
       font: "sans".to_string(),
       placement: WatermarkPlacement {
         opacity: 1.0,
-        pos: WmPosition::Ce,
+        pos: WmPosition::Center,
         x: 0,
         y: 0,
       },
@@ -579,7 +589,7 @@ mod tests {
       font: "sans".to_string(),
       placement: WatermarkPlacement {
         opacity: 1.0,
-        pos: WmPosition::Ce,
+        pos: WmPosition::Center,
         x: 0,
         y: 0,
       },

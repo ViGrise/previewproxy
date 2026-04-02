@@ -12,7 +12,7 @@ fn build_watermark_placement(params: &TransformParams) -> WatermarkPlacement {
       .wm_pos
       .as_deref()
       .map(WmPosition::from_str)
-      .unwrap_or(WmPosition::NoEa),
+      .unwrap_or(WmPosition::TopRight),
     x: params.wm_x.unwrap_or(0),
     y: params.wm_y.unwrap_or(0),
   }
