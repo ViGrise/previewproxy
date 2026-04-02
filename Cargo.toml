@@ -50,6 +50,7 @@ image = { version = "0.25", features = [
   "ico",
   "avif",
 ] }
+ab_glyph = "0.2"
 ravif = "0.13"
 bytemuck = { version = "1", features = ["derive"] }
 resvg = "0.47"

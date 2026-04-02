@@ -46,6 +46,24 @@ pub struct TransformParams {
   pub contrast: Option<i32>,
   /// Watermark image URL (http/https/s3/local).
   pub wm: Option<String>,
+  /// Watermark opacity multiplier (0.0-1.0). Applied to image and text watermarks.
+  pub wm_opacity: Option<f32>,
+  /// Watermark position: ce no so ea we noea nowe soea sowe re
+  pub wm_pos: Option<String>,
+  /// Watermark X offset in pixels (tile spacing for re).
+  pub wm_x: Option<i32>,
+  /// Watermark Y offset in pixels (tile spacing for re).
+  pub wm_y: Option<i32>,
+  /// Watermark scale relative to base image width (default 0.15; 0 = no resize).
+  pub wm_scale: Option<f32>,
+  /// Text watermark content (URL-safe string). Takes lower priority than `wm`.
+  pub wmt: Option<String>,
+  /// Text watermark hex color without `#`, e.g. `ff0000` (default `000000`).
+  pub wmt_color: Option<String>,
+  /// Text watermark font size in pixels (default 24).
+  pub wmt_size: Option<u32>,
+  /// Text watermark font family name (default `sans`).
+  pub wmt_font: Option<String>,
   /// HMAC signature for request validation (excluded from canonical string).
   pub sig: Option<String>,
   /// Animated GIF frame range selection.
@@ -171,6 +189,33 @@ impl TransformParams {
     if other.wm.is_some() {
       self.wm = other.wm;
     }
+    if other.wm_opacity.is_some() {
+      self.wm_opacity = other.wm_opacity;
+    }
+    if other.wm_pos.is_some() {
+      self.wm_pos = other.wm_pos;
+    }
+    if other.wm_x.is_some() {
+      self.wm_x = other.wm_x;
+    }
+    if other.wm_y.is_some() {
+      self.wm_y = other.wm_y;
+    }
+    if other.wm_scale.is_some() {
+      self.wm_scale = other.wm_scale;
+    }
+    if other.wmt.is_some() {
+      self.wmt = other.wmt;
+    }
+    if other.wmt_color.is_some() {
+      self.wmt_color = other.wmt_color;
+    }
+    if other.wmt_size.is_some() {
+      self.wmt_size = other.wmt_size;
+    }
+    if other.wmt_font.is_some() {
+      self.wmt_font = other.wmt_font;
+    }
     if other.sig.is_some() {
       self.sig = other.sig;
     }
@@ -240,6 +285,33 @@ impl TransformParams {
     if let Some(v) = &self.wm {
       parts.push(format!("wm={v}"));
     }
+    if let Some(v) = self.wm_opacity {
+      parts.push(format!("wm_opacity={:.4}", v));
+    }
+    if let Some(v) = &self.wm_pos {
+      parts.push(format!("wm_pos={v}"));
+    }
+    if let Some(v) = self.wm_x {
+      parts.push(format!("wm_x={v}"));
+    }
+    if let Some(v) = self.wm_y {
+      parts.push(format!("wm_y={v}"));
+    }
+    if let Some(v) = self.wm_scale {
+      parts.push(format!("wm_scale={:.4}", v));
+    }
+    if let Some(v) = &self.wmt {
+      parts.push(format!("wmt={v}"));
+    }
+    if let Some(v) = &self.wmt_color {
+      parts.push(format!("wmt_color={v}"));
+    }
+    if let Some(v) = self.wmt_size {
+      parts.push(format!("wmt_size={v}"));
+    }
+    if let Some(v) = &self.wmt_font {
+      parts.push(format!("wmt_font={v}"));
+    }
     format!("{}:{}", parts.join("&"), url)
   }
 
@@ -258,6 +330,7 @@ impl TransformParams {
       || self.bright.is_some()
       || self.contrast.is_some()
       || self.wm.is_some()
+      || self.wmt.is_some()
       || self.gif_anim.is_some()
   }
 
@@ -275,6 +348,7 @@ impl TransformParams {
       || self.bright.is_some()
       || self.contrast.is_some()
       || self.wm.is_some()
+      || self.wmt.is_some()
       || self.gif_anim.is_some()
       || self.gif_af.is_some()
   }
@@ -382,6 +456,61 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
     // wm:https://...
     if let Some(val) = token.strip_prefix("wm:") {
       p.wm = Some(val.to_string());
+      continue;
+    }
+    // wm_opacity:0.5
+    if let Some(val) = token.strip_prefix("wm_opacity:")
+      && let Ok(v) = val.parse::<f32>()
+    {
+      p.wm_opacity = Some(v.clamp(0.0, 1.0));
+      continue;
+    }
+    // wm_pos:ce
+    if let Some(val) = token.strip_prefix("wm_pos:") {
+      p.wm_pos = Some(val.to_string());
+      continue;
+    }
+    // wm_x:10
+    if let Some(val) = token.strip_prefix("wm_x:")
+      && let Ok(v) = val.parse::<i32>()
+    {
+      p.wm_x = Some(v);
+      continue;
+    }
+    // wm_y:-5
+    if let Some(val) = token.strip_prefix("wm_y:")
+      && let Ok(v) = val.parse::<i32>()
+    {
+      p.wm_y = Some(v);
+      continue;
+    }
+    // wm_scale:0.15
+    if let Some(val) = token.strip_prefix("wm_scale:")
+      && let Ok(v) = val.parse::<f32>()
+    {
+      p.wm_scale = Some(v.max(0.0));
+      continue;
+    }
+    // wmt:text
+    if let Some(val) = token.strip_prefix("wmt:") {
+      p.wmt = Some(val.to_string());
+      continue;
+    }
+    // wmt_color:ff0000
+    if let Some(val) = token.strip_prefix("wmt_color:") {
+      p.wmt_color = Some(val.to_string());
+      continue;
+    }
+    // wmt_size:24
+    if let Some(val) = token.strip_prefix("wmt_size:")
+      && let Ok(v) = val.parse::<u32>()
+    {
+      p.wmt_size = Some(v);
+      continue;
+    }
+    // wmt_font:sans
+    if let Some(val) = token.strip_prefix("wmt_font:") {
+      p.wmt_font = Some(val.to_string());
       continue;
     }
     // sig:hash
@@ -518,6 +647,47 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
             }
           }
           "wm" => p.wm = Some(val.to_string()),
+          "wm_opacity" => {
+            p.wm_opacity = Some(
+              val
+                .parse::<f32>()
+                .map_err(|_| ProxyError::InvalidParams("invalid wm_opacity".to_string()))?
+                .clamp(0.0, 1.0),
+            )
+          }
+          "wm_pos" => p.wm_pos = Some(val.to_string()),
+          "wm_x" => {
+            p.wm_x = Some(
+              val
+                .parse::<i32>()
+                .map_err(|_| ProxyError::InvalidParams("invalid wm_x".to_string()))?,
+            )
+          }
+          "wm_y" => {
+            p.wm_y = Some(
+              val
+                .parse::<i32>()
+                .map_err(|_| ProxyError::InvalidParams("invalid wm_y".to_string()))?,
+            )
+          }
+          "wm_scale" => {
+            p.wm_scale = Some(
+              val
+                .parse::<f32>()
+                .map_err(|_| ProxyError::InvalidParams("invalid wm_scale".to_string()))?
+                .max(0.0),
+            )
+          }
+          "wmt" => p.wmt = Some(val.to_string()),
+          "wmt_color" => p.wmt_color = Some(val.to_string()),
+          "wmt_size" => {
+            p.wmt_size = Some(
+              val
+                .parse::<u32>()
+                .map_err(|_| ProxyError::InvalidParams("invalid wmt_size".to_string()))?,
+            )
+          }
+          "wmt_font" => p.wmt_font = Some(val.to_string()),
           "sig" => p.sig = Some(val.to_string()),
           "gif_anim" => p.gif_anim = Some(parse_gif_anim_value(val)?),
           "gif_af" => p.gif_af = Some(val == "1" || val.eq_ignore_ascii_case("true")),
@@ -584,6 +754,50 @@ pub fn from_query(
   }
   if let Some(v) = query.get("wm") {
     p.wm = Some(v.clone());
+  }
+  if let Some(v) = query.get("wm_opacity") {
+    p.wm_opacity = Some(
+      v.parse::<f32>()
+        .map_err(|_| ProxyError::InvalidParams("invalid wm_opacity".to_string()))?
+        .clamp(0.0, 1.0),
+    );
+  }
+  if let Some(v) = query.get("wm_pos") {
+    p.wm_pos = Some(v.clone());
+  }
+  if let Some(v) = query.get("wm_x") {
+    p.wm_x = Some(
+      v.parse::<i32>()
+        .map_err(|_| ProxyError::InvalidParams("invalid wm_x".to_string()))?,
+    );
+  }
+  if let Some(v) = query.get("wm_y") {
+    p.wm_y = Some(
+      v.parse::<i32>()
+        .map_err(|_| ProxyError::InvalidParams("invalid wm_y".to_string()))?,
+    );
+  }
+  if let Some(v) = query.get("wm_scale") {
+    p.wm_scale = Some(
+      v.parse::<f32>()
+        .map_err(|_| ProxyError::InvalidParams("invalid wm_scale".to_string()))?
+        .max(0.0),
+    );
+  }
+  if let Some(v) = query.get("wmt") {
+    p.wmt = Some(v.clone());
+  }
+  if let Some(v) = query.get("wmt_color") {
+    p.wmt_color = Some(v.clone());
+  }
+  if let Some(v) = query.get("wmt_size") {
+    p.wmt_size = Some(
+      v.parse::<u32>()
+        .map_err(|_| ProxyError::InvalidParams("invalid wmt_size".to_string()))?,
+    );
+  }
+  if let Some(v) = query.get("wmt_font") {
+    p.wmt_font = Some(v.clone());
   }
   if let Some(v) = query.get("sig") {
     p.sig = Some(v.clone());
@@ -1571,5 +1785,93 @@ mod tests {
     assert_eq!(params.w, Some(32));
     assert_eq!(params.h, Some(32));
     assert_eq!(url, "enc/cdn:/uploads/file.pdf");
+  }
+
+  #[test]
+  fn new_wm_fields_default_none() {
+    let p = TransformParams::default();
+    assert!(p.wm_opacity.is_none());
+    assert!(p.wm_pos.is_none());
+    assert!(p.wm_x.is_none());
+    assert!(p.wm_y.is_none());
+    assert!(p.wm_scale.is_none());
+    assert!(p.wmt.is_none());
+    assert!(p.wmt_color.is_none());
+    assert!(p.wmt_size.is_none());
+    assert!(p.wmt_font.is_none());
+  }
+
+  #[test]
+  fn wmt_counts_as_transform() {
+    let p = TransformParams {
+      wmt: Some("hello".to_string()),
+      ..Default::default()
+    };
+    assert!(p.has_transforms());
+    assert!(p.has_non_format_transforms());
+  }
+
+  #[test]
+  fn path_parse_wm_opacity() {
+    let (p, _) = TransformParams::from_path("wm_opacity:0.5/https://example.com/img.jpg").unwrap();
+    assert_eq!(p.wm_opacity, Some(0.5));
+  }
+
+  #[test]
+  fn path_parse_wm_pos() {
+    let (p, _) = TransformParams::from_path("wm_pos:ce/https://example.com/img.jpg").unwrap();
+    assert_eq!(p.wm_pos, Some("ce".to_string()));
+  }
+
+  #[test]
+  fn path_parse_wm_x_y_scale() {
+    let (p, _) =
+      TransformParams::from_path("wm_x:10,wm_y:-5,wm_scale:0.2/https://example.com/img.jpg")
+        .unwrap();
+    assert_eq!(p.wm_x, Some(10));
+    assert_eq!(p.wm_y, Some(-5));
+    assert_eq!(p.wm_scale, Some(0.2));
+  }
+
+  #[test]
+  fn path_parse_wmt() {
+    let (p, _) = TransformParams::from_path("wmt:Hello/https://example.com/img.jpg").unwrap();
+    assert_eq!(p.wmt, Some("Hello".to_string()));
+  }
+
+  #[test]
+  fn path_parse_wmt_styling() {
+    let (p, _) = TransformParams::from_path(
+      "wmt_color:ff0000,wmt_size:32,wmt_font:sans/https://example.com/img.jpg",
+    )
+    .unwrap();
+    assert_eq!(p.wmt_color, Some("ff0000".to_string()));
+    assert_eq!(p.wmt_size, Some(32));
+    assert_eq!(p.wmt_font, Some("sans".to_string()));
+  }
+
+  #[test]
+  fn query_parse_wm_new_params() {
+    use std::collections::HashMap;
+    let mut q = HashMap::new();
+    q.insert("wm_opacity".to_string(), "0.8".to_string());
+    q.insert("wm_pos".to_string(), "noea".to_string());
+    q.insert("wm_x".to_string(), "5".to_string());
+    q.insert("wm_y".to_string(), "-3".to_string());
+    q.insert("wm_scale".to_string(), "0.1".to_string());
+    q.insert("wmt".to_string(), "WM".to_string());
+    q.insert("wmt_color".to_string(), "ffffff".to_string());
+    q.insert("wmt_size".to_string(), "18".to_string());
+    q.insert("wmt_font".to_string(), "sans".to_string());
+    let p = from_query(&q).unwrap();
+    assert_eq!(p.wm_opacity, Some(0.8));
+    assert_eq!(p.wm_pos, Some("noea".to_string()));
+    assert_eq!(p.wm_x, Some(5));
+    assert_eq!(p.wm_y, Some(-3));
+    assert_eq!(p.wm_scale, Some(0.1));
+    assert_eq!(p.wmt, Some("WM".to_string()));
+    assert_eq!(p.wmt_color, Some("ffffff".to_string()));
+    assert_eq!(p.wmt_size, Some(18));
+    assert_eq!(p.wmt_font, Some("sans".to_string()));
   }
 }

@@ -1,17 +1,18 @@
 use crate::common::errors::ProxyError;
 use crate::modules::proxy::dto::params::{GifAnimRange, TransformParams};
 use crate::modules::transform::ops;
+use crate::modules::transform::ops::watermark::WatermarkSpec;
 use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::{AnimationDecoder, DynamicImage, Frame};
 use std::io::Cursor;
 
-#[tracing::instrument(skip(src_bytes, wm_img), fields(input_bytes = src_bytes.len()))]
+#[tracing::instrument(skip(src_bytes, wm_spec), fields(input_bytes = src_bytes.len()))]
 pub fn run(
   src_bytes: &[u8],
   range: &GifAnimRange,
   all_frames: bool,
   params: &TransformParams,
-  wm_img: Option<DynamicImage>,
+  wm_spec: Option<WatermarkSpec>,
 ) -> Result<Vec<u8>, ProxyError> {
   // Decode all frames
   let decoder = GifDecoder::new(Cursor::new(src_bytes))
@@ -89,8 +90,8 @@ pub fn run(
       if let Some(sigma) = params.blur {
         img = ops::blur::gaussian_blur(img, sigma)?;
       }
-      if let Some(ref wm) = wm_img {
-        img = ops::watermark::apply_watermark_sync(img, wm.clone())?;
+      if let Some(ref spec) = wm_spec {
+        img = ops::watermark::apply_watermark_sync(img, spec.clone())?;
       }
 
       let (out_left, out_top) = if has_geometric { (0, 0) } else { (left, top) };
