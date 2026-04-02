@@ -1,9 +1,22 @@
 use crate::common::errors::ProxyError;
 use crate::modules::proxy::{dto::params::TransformParams, fetchable::Fetchable};
 use crate::modules::transform::ops;
-use image::{DynamicImage, ImageReader};
-use std::{io::Cursor, sync::Arc};
+use crate::modules::transform::ops::watermark::{WatermarkPlacement, WatermarkSpec, WmPosition};
+use std::sync::Arc;
 use tokio::task::spawn_blocking;
+
+fn build_watermark_placement(params: &TransformParams) -> WatermarkPlacement {
+  WatermarkPlacement {
+    opacity: params.wm_opacity.unwrap_or(1.0).clamp(0.0, 1.0),
+    pos: params
+      .wm_pos
+      .as_deref()
+      .map(WmPosition::from_str)
+      .unwrap_or(WmPosition::TopRight),
+    x: params.wm_x.unwrap_or(0),
+    y: params.wm_y.unwrap_or(0),
+  }
+}
 
 /// Validate and resolve content-type. Returns the resolved MIME string or ProxyError.
 #[tracing::instrument(skip(bytes), fields(input_bytes = bytes.len()))]
@@ -60,14 +73,6 @@ pub fn resolve_content_type(header: Option<&str>, bytes: &[u8]) -> Result<String
       Err(ProxyError::NotAnImage)
     }
   }
-}
-
-fn load_image(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
-  ImageReader::new(Cursor::new(bytes))
-    .with_guessed_format()
-    .map_err(|e| ProxyError::InternalError(e.to_string()))?
-    .decode()
-    .map_err(|e| ProxyError::InternalError(e.to_string()))
 }
 
 /// Applies the full image transform pipeline to `src_bytes`.
@@ -174,13 +179,42 @@ pub async fn run_pipeline(
   }
 
   // 3. Fetch watermark bytes if needed (async, before spawn_blocking)
-  let wm_bytes: Option<Vec<u8>> = if let Some(wm_url) = &params.wm {
+  // Disallow check for wmt (text watermark has no fetch, checked here before blocking)
+  if params.wmt.is_some()
+    && params.wm.is_none()
+    && transform_disallow.contains(&crate::common::config::DisallowedTransform::Watermark)
+  {
+    return Err(ProxyError::TransformDisabled("watermark".to_string()));
+  }
+
+  let wm_spec_async: Option<WatermarkSpec> = if let Some(wm_url) = &params.wm {
     let (bytes, wm_ct) = fetcher
       .fetch(wm_url)
       .await
       .map_err(|_| ProxyError::WatermarkFetchFailed)?;
     let _ = resolve_content_type(wm_ct.as_deref(), &bytes)?;
-    Some(bytes)
+    Some(WatermarkSpec::Image {
+      bytes,
+      scale: params.wm_scale.unwrap_or(0.15).max(0.0),
+      placement: build_watermark_placement(&params),
+    })
+  } else if let Some(text) = &params.wmt {
+    use crate::modules::transform::ops::watermark::parse_hex_color;
+    let color = if let Some(hex) = &params.wmt_color {
+      parse_hex_color(hex)?
+    } else {
+      [0, 0, 0, 255]
+    };
+    Some(WatermarkSpec::Text {
+      text: text.clone(),
+      color,
+      size: params.wmt_size.unwrap_or(24) as f32,
+      font: params
+        .wmt_font
+        .clone()
+        .unwrap_or_else(|| "sans".to_string()),
+      placement: build_watermark_placement(&params),
+    })
   } else {
     None
   };
@@ -201,22 +235,12 @@ pub async fn run_pipeline(
     let range = params_clone.gif_anim.clone().unwrap();
     let all_frames = params_clone.gif_af.unwrap_or(false);
     let result = spawn_blocking(move || {
-      let wm_img = if let Some(wm_data) = wm_bytes {
-        let wm = image::ImageReader::new(std::io::Cursor::new(wm_data))
-          .with_guessed_format()
-          .map_err(|e| ProxyError::InternalError(e.to_string()))?
-          .decode()
-          .map_err(|e| ProxyError::InternalError(e.to_string()))?;
-        Some(wm)
-      } else {
-        None
-      };
       crate::modules::transform::ops::gif_anim::run(
         &src_bytes,
         &range,
         all_frames,
         &params_clone,
-        wm_img,
+        wm_spec_async,
       )
     })
     .await
@@ -263,10 +287,9 @@ pub async fn run_pipeline(
     }
 
     // Watermark
-    if let Some(wm_data) = wm_bytes {
+    if let Some(spec) = wm_spec_async {
       tracing::debug!("pipeline: step watermark");
-      let wm_img = load_image(&wm_data)?;
-      img = ops::watermark::apply_watermark_sync(img, wm_img)?;
+      img = ops::watermark::apply_watermark_sync(img, spec)?;
     }
 
     // Encode
@@ -764,6 +787,59 @@ mod tests {
     )
     .await;
     assert!(result.is_ok());
+  }
+
+  #[tokio::test]
+  async fn test_text_watermark_end_to_end() {
+    // wmt (text watermark) works end-to-end without a fetcher call
+    let params = TransformParams {
+      wmt: Some("WM".to_string()),
+      wmt_color: Some("ffffff".to_string()),
+      wmt_size: Some(16),
+      wm_pos: Some("ce".to_string()),
+      wm_opacity: Some(0.8),
+      format: Some("png".to_string()),
+      ..Default::default()
+    };
+    let bytes = tiny_png_bytes();
+    let (out, ct) = run_pipeline(
+      params,
+      bytes,
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ct, "image/png");
+    assert!(!out.is_empty());
+  }
+
+  #[tokio::test]
+  async fn test_text_watermark_disallow_blocks_wmt() {
+    use crate::common::config::DisallowedTransform;
+    let mut transform_disallow = std::collections::HashSet::new();
+    transform_disallow.insert(DisallowedTransform::Watermark);
+    let params = TransformParams {
+      wmt: Some("blocked".to_string()),
+      ..Default::default()
+    };
+    let result = run_pipeline(
+      params,
+      tiny_png_bytes(),
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &transform_disallow,
+      &best_format_cfg_default(),
+    )
+    .await;
+    assert!(matches!(
+      result,
+      Err(crate::common::errors::ProxyError::TransformDisabled(_))
+    ));
   }
 
   #[tokio::test]

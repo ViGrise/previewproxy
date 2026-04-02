@@ -1,21 +1,24 @@
 use crate::common::errors::ProxyError;
 use crate::modules::proxy::dto::params::{GifAnimRange, TransformParams};
 use crate::modules::transform::ops;
+use crate::modules::transform::ops::watermark::WatermarkSpec;
 use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::{AnimationDecoder, DynamicImage, Frame};
 use std::io::Cursor;
 
-#[tracing::instrument(skip(src_bytes, wm_img), fields(input_bytes = src_bytes.len()))]
+#[tracing::instrument(skip(src_bytes, wm_spec), fields(input_bytes = src_bytes.len()))]
 pub fn run(
   src_bytes: &[u8],
   range: &GifAnimRange,
   all_frames: bool,
   params: &TransformParams,
-  wm_img: Option<DynamicImage>,
+  wm_spec: Option<WatermarkSpec>,
 ) -> Result<Vec<u8>, ProxyError> {
   // Decode all frames
+  tracing::debug!("Decoding GIF animation frames");
   let decoder = GifDecoder::new(Cursor::new(src_bytes))
     .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+  tracing::trace!("Collecting frames from GIF decoder");
   let frames: Vec<Frame> = decoder
     .into_frames()
     .collect_frames()
@@ -89,8 +92,8 @@ pub fn run(
       if let Some(sigma) = params.blur {
         img = ops::blur::gaussian_blur(img, sigma)?;
       }
-      if let Some(ref wm) = wm_img {
-        img = ops::watermark::apply_watermark_sync(img, wm.clone())?;
+      if let Some(ref spec) = wm_spec {
+        img = ops::watermark::apply_watermark_sync(img, spec.clone())?;
       }
 
       let (out_left, out_top) = if has_geometric { (0, 0) } else { (left, top) };
@@ -119,10 +122,15 @@ pub fn run(
   let mut buf = Cursor::new(Vec::new());
   {
     let mut encoder = GifEncoder::new(&mut buf);
+    tracing::trace!("Setting GIF encoder to infinite repeat");
     encoder
       .set_repeat(Repeat::Infinite)
       .map_err(|e| ProxyError::InternalError(e.to_string()))?;
     for frame in out_frames {
+      tracing::trace!(
+        "Encoding frame with delay {} ms",
+        frame.delay().numer_denom_ms().0
+      );
       encoder
         .encode_frame(frame)
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;

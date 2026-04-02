@@ -21,6 +21,7 @@ pub fn encode(
       let (width, height) = rgba.dimensions();
       let px: &[ravif::RGBA8] = cast_slice(rgba.as_raw());
       let buf = ravif::Img::new(px, width as usize, height as usize);
+      tracing::trace!("Encoding image to AVIF format using ravif");
       let encoded = ravif::Encoder::new()
         .with_quality(quality as f32)
         .with_speed(6)
@@ -38,11 +39,13 @@ pub fn encode(
       use jpegxl_rs::{encode::EncoderFrame, encoder_builder};
       let rgba = img.to_rgba8();
       let (width, height) = rgba.dimensions();
+      tracing::trace!("Encoding image to JPEG XL format using jpegxl_rs");
       let mut encoder = encoder_builder()
         .has_alpha(true)
         .build()
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;
       let frame = EncoderFrame::new(rgba.as_raw()).num_channels(4);
+      tracing::trace!("Encoding frame to JPEG XL format");
       let result = encoder
         .encode_frame::<u8, u8>(&frame, width, height)
         .map_err(|e| ProxyError::InternalError(e.to_string()))?;
@@ -62,10 +65,12 @@ pub fn encode(
   if fmt == ImageFormat::Jpeg {
     let encoder =
       image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality.clamp(1, 100) as u8);
+    tracing::trace!("Encoding image to JPEG format with quality {}", quality);
     img
       .write_with_encoder(encoder)
       .map_err(|e| ProxyError::InternalError(e.to_string()))?;
   } else {
+    tracing::trace!("Encoding image to {} format", fmt.to_mime_type());
     img
       .write_to(&mut buf, fmt)
       .map_err(|e| ProxyError::InternalError(e.to_string()))?;
