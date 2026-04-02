@@ -506,28 +506,28 @@ mod tests {
 
   #[test]
   fn position_no_top_center() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::No, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Top, 0, 0);
     assert_eq!(x, 40);
     assert_eq!(y, 0);
   }
 
   #[test]
   fn position_so_bottom_center() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::So, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Bottom, 0, 0);
     assert_eq!(x, 40);
     assert_eq!(y, 70);
   }
 
   #[test]
   fn position_ea_right_center() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Ea, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Right, 0, 0);
     assert_eq!(x, 80);
     assert_eq!(y, 35);
   }
 
   #[test]
   fn position_we_left_center() {
-    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::We, 0, 0);
+    let (x, y) = compute_single_position(100, 80, 20, 10, &WmPosition::Left, 0, 0);
     assert_eq!(x, 0);
     assert_eq!(y, 35);
   }
