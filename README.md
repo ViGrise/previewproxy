@@ -88,11 +88,11 @@ Query params take precedence when both styles are combined.
 ### Linux / macOS
 
 ```shell
-curl -s -o- https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.sh | sudo bash
+curl -s -o- https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.sh | sudo -E bash
 ```
 
 ```shell
-wget -qO- https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/ViGrise/previewproxy/main/install.sh | sudo -E bash
 ```
 
 Installs to `/usr/local/bin`. Override with env vars:

@@ -40,6 +40,46 @@ pub fn download_url(tag: &str) -> String {
   )
 }
 
+/// Re-execute the current process with elevated privileges.
+///
+/// On Unix this execs `sudo <exe> upgrade`, replacing the current process.
+/// On Windows this uses PowerShell RunAs, waits for the child,
+/// then the caller should exit immediately.
+fn reexec_with_privileges(exe: &std::path::Path) -> Result<()> {
+  #[cfg(unix)]
+  {
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new("sudo")
+      .arg("--")
+      .arg(exe)
+      .arg("upgrade")
+      .exec();
+    anyhow::bail!("Failed to re-exec with sudo: {err}");
+  }
+
+  #[cfg(windows)]
+  {
+    let exe_str = exe.to_string_lossy();
+    let ps_cmd = format!(
+      "Start-Process -FilePath '{}' -ArgumentList 'upgrade' -Verb RunAs -Wait",
+      exe_str.replace("'", "\'")
+    );
+    let status = std::process::Command::new("powershell")
+      .args(["-Command", &ps_cmd])
+      .status()
+      .map_err(|e| anyhow::anyhow!("Failed to re-launch with elevated permissions: {e}"))?;
+    if !status.success() {
+      anyhow::bail!("Elevated upgrade process failed");
+    }
+    Ok(())
+  }
+
+  #[cfg(not(any(unix, windows)))]
+  {
+    anyhow::bail!("Cannot write to the binary directory. Re-run with elevated permissions.");
+  }
+}
+
 pub async fn run_upgrade() -> Result<()> {
   use std::io::Write;
   use std::time::Duration;
@@ -56,6 +96,19 @@ pub async fn run_upgrade() -> Result<()> {
     if old.exists() {
       let _ = std::fs::remove_file(&old);
     }
+  }
+
+  // Fail fast before downloading if we lack write permission on the exe directory.
+  // If so, re-exec with elevated privileges rather than returning an error.
+  if tempfile::Builder::new()
+    .prefix(".previewproxy-upgrade-check-")
+    .tempfile_in(exe_dir)
+    .is_err()
+  {
+    reexec_with_privileges(&exe)?;
+    // reexec_with_privileges replaces this process on Unix; on Windows it
+    // waits for the elevated process to finish and then exits.
+    std::process::exit(0);
   }
 
   let client = reqwest::Client::builder()
