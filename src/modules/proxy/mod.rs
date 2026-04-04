@@ -2,5 +2,8 @@ pub mod controller;
 pub mod dto;
 pub mod fallback;
 pub mod fetchable;
+pub mod retry;
+pub mod router;
 pub mod service;
 pub mod sources;
+pub mod video;

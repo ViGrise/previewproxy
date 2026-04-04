@@ -3,10 +3,10 @@ use crate::modules::AppState;
 use crate::modules::cache::manager::CacheManager;
 use crate::modules::proxy::fallback::FallbackImage;
 use crate::modules::proxy::fetchable::Fetchable;
+use crate::modules::proxy::retry::RetryFetcher;
+use crate::modules::proxy::router::SourceRouter;
 use crate::modules::proxy::sources::http::HttpFetcher;
-use crate::modules::proxy::sources::{
-  AliasSource, LocalSource, RetryFetcher, S3Source, SourceRouter,
-};
+use crate::modules::proxy::sources::{AliasSource, LocalSource, S3Source};
 use crate::modules::security::allowlist::Allowlist;
 use axum::Router;
 use std::sync::Arc;
@@ -62,7 +62,14 @@ pub async fn router(
       )
       .with_private_ip_check(check_private),
     );
-    Arc::new(AliasSource::new(aliases.clone(), alias_http))
+    let alias_s3 = s3.clone().map(|x| x as Arc<dyn Fetchable>);
+    let alias_local = local.clone().map(|x| x as Arc<dyn Fetchable>);
+    Arc::new(AliasSource::new(
+      aliases.clone(),
+      alias_http,
+      alias_s3,
+      alias_local,
+    ))
   });
 
   let fetcher: Arc<dyn Fetchable> = Arc::new(RetryFetcher::new(
