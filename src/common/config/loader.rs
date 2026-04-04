@@ -192,9 +192,13 @@ fn parse_url_aliases(s: &str) -> Option<HashMap<String, String>> {
         tracing::warn!("URL_ALIASES: skipping entry {:?} with empty base URL", name);
         return None;
       }
-      if !base.starts_with("http://") && !base.starts_with("https://") {
+      let valid_scheme = base.starts_with("http://")
+        || base.starts_with("https://")
+        || base.starts_with("s3:/")
+        || base.starts_with("local:/");
+      if !valid_scheme {
         tracing::warn!(
-          "URL_ALIASES: skipping entry {:?} - base URL must be http:// or https://, got {:?}",
+          "URL_ALIASES: skipping entry {:?} - base must start with http://, https://, s3:/, or local:/, got {:?}",
           name, base
         );
         return None;
@@ -699,6 +703,40 @@ mod tests {
     let map = cfg.url_aliases.clone().unwrap();
     assert_eq!(map.len(), 1);
     assert!(map.contains_key("ok"));
+  }
+
+  #[test]
+  fn test_url_aliases_accepts_s3_base() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PP_PORT", "8080");
+      std::env::set_var("PP_APP_ENV", "development");
+      std::env::set_var("PP_URL_ALIASES", "thumbs=s3:/my-bucket/thumbnails");
+    }
+    let cfg = super::Configuration::new();
+    unsafe { std::env::remove_var("PP_URL_ALIASES") };
+    let map = cfg.url_aliases.clone().unwrap();
+    assert_eq!(
+      map.get("thumbs").map(String::as_str),
+      Some("s3:/my-bucket/thumbnails")
+    );
+  }
+
+  #[test]
+  fn test_url_aliases_accepts_local_base() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PP_PORT", "8080");
+      std::env::set_var("PP_APP_ENV", "development");
+      std::env::set_var("PP_URL_ALIASES", "assets=local:/var/www/static");
+    }
+    let cfg = super::Configuration::new();
+    unsafe { std::env::remove_var("PP_URL_ALIASES") };
+    let map = cfg.url_aliases.clone().unwrap();
+    assert_eq!(
+      map.get("assets").map(String::as_str),
+      Some("local:/var/www/static")
+    );
   }
 
   #[test]

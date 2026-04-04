@@ -200,7 +200,7 @@ mod tests {
     );
     let mut map = std::collections::HashMap::new();
     map.insert("mycdn".to_string(), server_uri.to_string());
-    Arc::new(AliasSource::new(map, http))
+    Arc::new(AliasSource::new(map, http, None, None))
   }
 
   #[tokio::test]

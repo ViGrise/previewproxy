@@ -357,7 +357,7 @@ impl ProxyService {
     let is_video = src_ct
       .as_deref()
       .map(|ct| ct.starts_with("video/"))
-      .unwrap_or_else(|| crate::modules::proxy::sources::video::is_video_magic(&src_bytes));
+      .unwrap_or_else(|| crate::modules::proxy::video::is_video_magic(&src_bytes));
 
     if is_video
       && self
@@ -370,7 +370,7 @@ impl ProxyService {
 
     if is_video {
       use crate::modules::proxy::dto::params::SeekMode;
-      use crate::modules::proxy::sources::video::{extract_frame, probe_duration};
+      use crate::modules::proxy::video::{extract_frame, probe_duration};
 
       let t_secs = match &params.seek {
         None => 0.0,
@@ -392,7 +392,7 @@ impl ProxyService {
       };
 
       match extract_frame(&src_bytes, t_secs, &self.ffmpeg_path).await {
-        Ok(frame) => match crate::modules::proxy::sources::video::frame_to_png_bytes(frame) {
+        Ok(frame) => match crate::modules::proxy::video::frame_to_png_bytes(frame) {
           Ok(png_bytes) => {
             src_bytes = png_bytes;
             src_ct = Some("image/png".to_string());
