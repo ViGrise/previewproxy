@@ -299,15 +299,30 @@ impl ProxyService {
     }
     // --- End streaming path (video/PDF fell through to here) ---
 
-    // 7. Fetch (Issue 4 fix: pass original error to guard)
+    // 7. Fetch
     tracing::info!(url = image_url.as_str(), "fetch start");
     let download_start = Instant::now();
     let fetch_result = self.fetcher.fetch(&image_url).await;
+    let fetch_elapsed = download_start.elapsed().as_secs_f64();
+    let source_label = if image_url.starts_with("http://") || image_url.starts_with("https://") {
+      "http"
+    } else if image_url.starts_with("s3:/") {
+      "s3"
+    } else if image_url.starts_with("local:/") {
+      "local"
+    } else {
+      "alias"
+    };
     self
       .metrics
       .request_span_duration_seconds
       .with_label_values(&["downloading"])
-      .observe(download_start.elapsed().as_secs_f64());
+      .observe(fetch_elapsed);
+    self
+      .metrics
+      .source_fetch_duration_seconds
+      .with_label_values(&[source_label])
+      .observe(fetch_elapsed);
     let (mut src_bytes, mut src_ct) = match fetch_result {
       Ok(v) => {
         tracing::info!(
@@ -432,6 +447,15 @@ impl ProxyService {
     let pipeline_result = if run_pipeline_flag {
       self.metrics.images_in_progress.inc();
       let transform_start = Instant::now();
+      let transform_label = if is_video {
+        "video"
+      } else if is_pdf {
+        "pdf"
+      } else if needs_best {
+        "best"
+      } else {
+        "resize"
+      };
       let result = pipeline::run_pipeline(
         params,
         src_bytes,
@@ -447,11 +471,17 @@ impl ProxyService {
         content_type: ct,
       });
       self.metrics.images_in_progress.dec();
+      let pipeline_elapsed = transform_start.elapsed().as_secs_f64();
       self
         .metrics
         .request_span_duration_seconds
         .with_label_values(&["processing"])
-        .observe(transform_start.elapsed().as_secs_f64());
+        .observe(pipeline_elapsed);
+      self
+        .metrics
+        .transform_duration_seconds
+        .with_label_values(&[transform_label])
+        .observe(pipeline_elapsed);
       if let Ok(ref entry) = result {
         tracing::info!(
           url = image_url.as_str(),

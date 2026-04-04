@@ -40,7 +40,9 @@ impl HttpFetcher {
       if !al.is_allowed(host) {
         return attempt.error("host_not_allowed");
       }
-      if let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&(host, 80u16)) {
+      if let Ok(addrs) = tokio::task::block_in_place(|| {
+        std::net::ToSocketAddrs::to_socket_addrs(&(host.to_string(), 80u16))
+      }) {
         for addr in addrs {
           if is_private_ip(addr.ip()) {
             return attempt.error("host_not_allowed");
