@@ -22,6 +22,8 @@ pub struct Configuration {
   pub source_url_encryption_key: Option<Vec<u8>>,
   // Fetching
   pub fetch_timeout_secs: u64,
+  pub fetch_retry_count: u32,
+  pub fetch_retry_delay_ms: u64,
   pub max_source_bytes: u64,
   // Cache
   pub cache_memory_max_mb: u64,
@@ -273,6 +275,8 @@ impl Configuration {
         .map(|s| parse_hex_key("PP_SOURCE_URL_ENCRYPTION_KEY", &s)),
       allowed_hosts,
       fetch_timeout_secs: env_var_u64("PP_FETCH_TIMEOUT_SECS", 10),
+      fetch_retry_count: env_var_u64("PP_FETCH_RETRY_COUNT", 3) as u32,
+      fetch_retry_delay_ms: env_var_u64("PP_FETCH_RETRY_DELAY_MS", 0),
       max_source_bytes: env_var_u64("PP_MAX_SOURCE_BYTES", 20_971_520),
       cache_memory_max_mb: env_var_u64("PP_CACHE_MEMORY_MAX_MB", 256),
       cache_memory_ttl_secs: env_var_u64("PP_CACHE_MEMORY_TTL_SECS", 3600),
@@ -406,6 +410,8 @@ impl std::fmt::Debug for Configuration {
       )
       .field("allowed_hosts", &self.allowed_hosts)
       .field("fetch_timeout_secs", &self.fetch_timeout_secs)
+      .field("fetch_retry_count", &self.fetch_retry_count)
+      .field("fetch_retry_delay_ms", &self.fetch_retry_delay_ms)
       .field("max_source_bytes", &self.max_source_bytes)
       .field("cache_memory_max_mb", &self.cache_memory_max_mb)
       .field("cache_memory_ttl_secs", &self.cache_memory_ttl_secs)

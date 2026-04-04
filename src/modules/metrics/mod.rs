@@ -23,6 +23,8 @@ pub struct Metrics {
   pub workers_utilization: Gauge,
   pub buffer_default_size_bytes: Gauge,
   pub buffer_max_size_bytes: Gauge,
+  // Retry tracking
+  pub fetch_retries_total: IntCounter,
   // Per-workflow breakdowns
   pub source_fetch_duration_seconds: HistogramVec,
   pub transform_duration_seconds: HistogramVec,
@@ -183,6 +185,17 @@ impl Metrics {
       .unwrap()
     );
 
+    let fetch_retries_total = register!(
+      IntCounter::with_opts(
+        Opts::new(
+          "fetch_retries_total",
+          "Total fetch retry attempts due to connection errors"
+        )
+        .namespace(ns)
+      )
+      .unwrap()
+    );
+
     let source_fetch_duration_seconds = register!(
       HistogramVec::new(
         HistogramOpts::new(
@@ -269,6 +282,7 @@ impl Metrics {
       workers_utilization,
       buffer_default_size_bytes,
       buffer_max_size_bytes,
+      fetch_retries_total,
       source_fetch_duration_seconds,
       transform_duration_seconds,
       cache_hits_total,

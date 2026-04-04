@@ -312,6 +312,8 @@ mod concurrency_tests {
       source_url_encryption_key: None,
       allowed_hosts: vec![],
       fetch_timeout_secs: 10,
+      fetch_retry_count: 0,
+      fetch_retry_delay_ms: 0,
       max_source_bytes: 1_000_000,
       cache_memory_max_mb: 16,
       cache_memory_ttl_secs: 60,
