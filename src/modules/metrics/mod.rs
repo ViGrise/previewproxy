@@ -23,6 +23,9 @@ pub struct Metrics {
   pub workers_utilization: Gauge,
   pub buffer_default_size_bytes: Gauge,
   pub buffer_max_size_bytes: Gauge,
+  // Per-workflow breakdowns
+  pub source_fetch_duration_seconds: HistogramVec,
+  pub transform_duration_seconds: HistogramVec,
   // Cache
   pub cache_hits_total: IntCounterVec,
   pub cache_misses_total: IntCounterVec,
@@ -180,6 +183,36 @@ impl Metrics {
       .unwrap()
     );
 
+    let source_fetch_duration_seconds = register!(
+      HistogramVec::new(
+        HistogramOpts::new(
+          "source_fetch_duration_seconds",
+          "Upstream fetch latency by source type (http, s3, local, alias)"
+        )
+        .namespace(ns)
+        .buckets(vec![
+          0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
+        ]),
+        &["source"]
+      )
+      .unwrap()
+    );
+
+    let transform_duration_seconds = register!(
+      HistogramVec::new(
+        HistogramOpts::new(
+          "transform_duration_seconds",
+          "Transform pipeline latency by workflow (passthrough, resize, best, video, pdf)"
+        )
+        .namespace(ns)
+        .buckets(vec![
+          0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
+        ]),
+        &["transform"]
+      )
+      .unwrap()
+    );
+
     let cache_hits_total = register!(
       IntCounterVec::new(
         Opts::new("cache_hits_total", "Cache hits by layer").namespace(ns),
@@ -236,6 +269,8 @@ impl Metrics {
       workers_utilization,
       buffer_default_size_bytes,
       buffer_max_size_bytes,
+      source_fetch_duration_seconds,
+      transform_duration_seconds,
       cache_hits_total,
       cache_misses_total,
       cache_memory_size_bytes,
