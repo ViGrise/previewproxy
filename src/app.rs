@@ -4,7 +4,9 @@ use crate::modules::cache::manager::CacheManager;
 use crate::modules::proxy::fallback::FallbackImage;
 use crate::modules::proxy::fetchable::Fetchable;
 use crate::modules::proxy::sources::http::HttpFetcher;
-use crate::modules::proxy::sources::{AliasSource, LocalSource, S3Source, SourceRouter};
+use crate::modules::proxy::sources::{
+  AliasSource, LocalSource, RetryFetcher, S3Source, SourceRouter,
+};
 use crate::modules::security::allowlist::Allowlist;
 use axum::Router;
 use std::sync::Arc;
@@ -63,7 +65,12 @@ pub async fn router(
     Arc::new(AliasSource::new(aliases.clone(), alias_http))
   });
 
-  let fetcher: Arc<dyn Fetchable> = Arc::new(SourceRouter::new(http, s3, local, alias));
+  let fetcher: Arc<dyn Fetchable> = Arc::new(RetryFetcher::new(
+    Arc::new(SourceRouter::new(http, s3, local, alias)),
+    cfg.fetch_retry_count,
+    cfg.fetch_retry_delay_ms,
+    metrics.clone(),
+  ));
 
   let cors_layer = middlewares::cors_layer(&cfg.cors_allow_origin, cfg.cors_max_age_secs);
 

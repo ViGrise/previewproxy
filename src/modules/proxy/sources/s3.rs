@@ -60,6 +60,10 @@ impl Fetchable for S3Source {
         {
           return ProxyError::UpstreamNotFound;
         }
+        // DispatchFailure means the request never reached S3 - treat as connection error
+        if matches!(e, aws_sdk_s3::error::SdkError::DispatchFailure(_)) {
+          return ProxyError::UpstreamConnectionError;
+        }
         ProxyError::InternalError(e.to_string())
       })?;
 
@@ -72,11 +76,17 @@ impl Fetchable for S3Source {
 
     let content_type = resp.content_type().map(|s| s.to_string());
 
-    let collected = resp
-      .body
-      .collect()
-      .await
-      .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+    let collected = resp.body.collect().await.map_err(|e| {
+      let msg = e.to_string().to_lowercase();
+      if msg.contains("connection reset")
+        || msg.contains("broken pipe")
+        || msg.contains("connection closed")
+      {
+        ProxyError::UpstreamConnectionError
+      } else {
+        ProxyError::InternalError(e.to_string())
+      }
+    })?;
 
     let bytes = collected.into_bytes();
 

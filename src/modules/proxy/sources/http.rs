@@ -84,6 +84,8 @@ impl HttpFetcher {
     let resp = self.client.get(url).send().await.map_err(|e| {
       if e.is_timeout() {
         ProxyError::UpstreamTimeout
+      } else if e.is_connect() {
+        ProxyError::UpstreamConnectionError
       } else if e.is_redirect() {
         ProxyError::TooManyRedirects
       } else {
@@ -128,7 +130,13 @@ impl HttpFetcher {
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
-      let chunk = chunk.map_err(|e| ProxyError::InternalError(e.to_string()))?;
+      let chunk = chunk.map_err(|e| {
+        if e.is_body() || e.is_connect() {
+          ProxyError::UpstreamConnectionError
+        } else {
+          ProxyError::InternalError(e.to_string())
+        }
+      })?;
       buf.extend_from_slice(&chunk);
       if buf.len() as u64 > self.max_bytes {
         return Err(ProxyError::SourceTooLarge);
@@ -157,6 +165,8 @@ impl HttpFetcher {
     let resp = self.client.get(url).send().await.map_err(|e| {
       if e.is_timeout() {
         ProxyError::UpstreamTimeout
+      } else if e.is_connect() {
+        ProxyError::UpstreamConnectionError
       } else if e.is_redirect() {
         ProxyError::TooManyRedirects
       } else {

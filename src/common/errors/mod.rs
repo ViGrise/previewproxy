@@ -13,6 +13,8 @@ pub enum ProxyError {
   UpstreamNotFound,
   #[error("upstream_timeout")]
   UpstreamTimeout,
+  #[error("upstream_connection_error")]
+  UpstreamConnectionError,
   #[error("too_many_redirects")]
   TooManyRedirects,
   #[error("not_an_image")]
@@ -41,6 +43,13 @@ pub enum ProxyError {
   InternalError(String),
 }
 
+impl ProxyError {
+  /// Returns true for transient connection-level failures that are safe to retry.
+  pub fn is_connection_error(&self) -> bool {
+    matches!(self, ProxyError::UpstreamConnectionError)
+  }
+}
+
 impl From<anyhow::Error> for ProxyError {
   fn from(e: anyhow::Error) -> Self {
     ProxyError::InternalError(format!("{:#}", e))
@@ -60,6 +69,7 @@ impl IntoResponse for ProxyError {
     match &self {
       ProxyError::InternalError(detail) => error!("internal_error: {}", detail),
       ProxyError::UpstreamTimeout
+      | ProxyError::UpstreamConnectionError
       | ProxyError::TooManyRedirects
       | ProxyError::WatermarkFetchFailed
       | ProxyError::HeicDecodeError
@@ -70,6 +80,7 @@ impl IntoResponse for ProxyError {
     let status = match &self {
       ProxyError::UpstreamNotFound => StatusCode::NOT_FOUND,
       ProxyError::UpstreamTimeout
+      | ProxyError::UpstreamConnectionError
       | ProxyError::TooManyRedirects
       | ProxyError::WatermarkFetchFailed => StatusCode::BAD_GATEWAY,
       ProxyError::NotAnImage => StatusCode::UNPROCESSABLE_ENTITY,
