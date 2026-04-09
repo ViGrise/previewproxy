@@ -273,8 +273,7 @@ GET /300x200,webp/mycdn:/photos/dog.jpg
 GET /proxy?url=mycdn:/photos/dog.jpg&w=300
 ```
 
-- Aliases bypass `PP_ALLOWED_HOSTS` (operator-controlled, implicitly trusted)
-- SSRF protection (private IP blocking) still applies
+- Aliases bypass `PP_ALLOWED_HOSTS` and private IP blocking.
 - Base URL must be `http://` or `https://`
 
 ## Development

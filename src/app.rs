@@ -60,7 +60,7 @@ pub async fn router(
         cfg.max_source_bytes,
         Arc::new(Allowlist::new(vec![])),
       )
-      .with_private_ip_check(check_private),
+      .with_private_ip_check(false), // aliases are defined in server config, bypass SSRF
     );
     let alias_s3 = s3.clone().map(|x| x as Arc<dyn Fetchable>);
     let alias_local = local.clone().map(|x| x as Arc<dyn Fetchable>);
