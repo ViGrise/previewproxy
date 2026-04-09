@@ -15,6 +15,9 @@ use tracing::debug;
 struct Meta {
   content_type: String,
   created_at: u64,
+  /// Per-entry TTL in seconds. None means use the DiskCache instance default.
+  #[serde(default)]
+  ttl_secs: Option<u64>,
 }
 
 /// Persistent on-disk cache stored as sharded flat files.
@@ -72,10 +75,11 @@ impl DiskCache {
     let meta: Meta = serde_json::from_slice(&meta_bytes)?;
     let now = now_unix();
     let age = now.saturating_sub(meta.created_at);
-    let expired = if self.ttl_secs == 0 {
+    let effective_ttl = meta.ttl_secs.unwrap_or(self.ttl_secs);
+    let expired = if effective_ttl == 0 {
       true
     } else {
-      age >= self.ttl_secs
+      age >= effective_ttl
     };
     if expired {
       debug!(key = %key, age_secs = age, ttl_secs = self.ttl_secs, path = %meta_path.display(), "disk cache TTL expired - removing entry");
@@ -93,12 +97,13 @@ impl DiskCache {
   }
 
   #[tracing::instrument(skip(self, entry), fields(key = %key, bytes = entry.bytes.len()))]
-  pub async fn set(&self, key: &str, entry: CacheEntry) -> Result<()> {
+  pub async fn set(&self, key: &str, entry: CacheEntry, ttl_override: Option<u64>) -> Result<()> {
     let shard = self.shard_dir(key);
     fs::create_dir_all(&shard).await?;
     let meta = Meta {
       content_type: entry.content_type,
       created_at: now_unix(),
+      ttl_secs: ttl_override,
     };
     let bin_path = self.bin_path(key);
     debug!(key = %key, bytes = entry.bytes.len(), path = %bin_path.display(), "writing entry to disk cache");
@@ -138,10 +143,11 @@ impl DiskCache {
         };
         if let Ok(meta) = serde_json::from_slice::<Meta>(&meta_bytes) {
           let age = now.saturating_sub(meta.created_at);
-          let stale = if self.ttl_secs == 0 {
+          let effective_ttl = meta.ttl_secs.unwrap_or(self.ttl_secs);
+          let stale = if effective_ttl == 0 {
             true
           } else {
-            age >= self.ttl_secs
+            age >= effective_ttl
           };
           if stale {
             debug!(key = %key, age_secs = age, ttl_secs = self.ttl_secs, "disk cleanup: evicting TTL-expired entry");
@@ -200,7 +206,7 @@ mod tests {
       bytes: vec![1, 2, 3],
       content_type: "image/png".to_string(),
     };
-    disk.set("abc123def456", entry.clone()).await.unwrap();
+    disk.set("abc123def456", entry.clone(), None).await.unwrap();
     let result = disk.get("abc123def456").await.unwrap();
     assert!(result.is_some());
     assert_eq!(result.unwrap().bytes, vec![1, 2, 3]);
@@ -214,7 +220,7 @@ mod tests {
       bytes: vec![1],
       content_type: "image/png".to_string(),
     };
-    disk.set("stalekey0011", entry).await.unwrap();
+    disk.set("stalekey0011", entry, None).await.unwrap();
     // Even with 0s TTL, entry is stale immediately
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     let result = disk.get("stalekey0011").await.unwrap();
@@ -226,5 +232,43 @@ mod tests {
     let dir = TempDir::new().unwrap();
     let disk = DiskCache::new(dir.path().to_str().unwrap().to_string(), 86400, None);
     assert!(disk.get("nonexistent00").await.unwrap().is_none());
+  }
+
+  #[tokio::test]
+  async fn test_per_entry_ttl_override() {
+    let dir = TempDir::new().unwrap();
+    // DiskCache default TTL = 1s, but entry stored with TTL = 86400s
+    let disk = DiskCache::new(dir.path().to_str().unwrap().to_string(), 1, None);
+    let entry = CacheEntry {
+      bytes: vec![9, 8, 7],
+      content_type: "image/png".to_string(),
+    };
+    disk.set("aabbccdd0011", entry, Some(86400)).await.unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    // Should NOT be expired because per-entry TTL = 86400s
+    let result = disk.get("aabbccdd0011").await.unwrap();
+    assert!(
+      result.is_some(),
+      "entry with long per-entry TTL should still be live"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_per_entry_ttl_short() {
+    let dir = TempDir::new().unwrap();
+    // DiskCache default TTL = 86400s, but entry stored with TTL = 0s
+    let disk = DiskCache::new(dir.path().to_str().unwrap().to_string(), 86400, None);
+    let entry = CacheEntry {
+      bytes: vec![1],
+      content_type: "image/png".to_string(),
+    };
+    disk.set("aabbccdd0022", entry, Some(0)).await.unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    // Should be expired because per-entry TTL = 0s
+    let result = disk.get("aabbccdd0022").await.unwrap();
+    assert!(
+      result.is_none(),
+      "entry with TTL=0 should be expired immediately"
+    );
   }
 }

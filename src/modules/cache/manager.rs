@@ -3,6 +3,7 @@ use crate::modules::cache::{
   disk::DiskCache,
   inflight::InflightMap,
   memory::{CacheEntry, MemoryCache},
+  origin::OriginCache,
 };
 use crate::modules::metrics::Metrics;
 use sha2::{Digest, Sha256};
@@ -27,6 +28,7 @@ pub enum CacheHit {
 pub struct CacheManager {
   l1: MemoryCache,
   pub l2: Arc<DiskCache>,
+  origin_l2: OriginCache,
   inflight: InflightMap,
   metrics: Arc<Metrics>,
 }
@@ -42,9 +44,11 @@ impl CacheManager {
       cfg.cache_disk_ttl_secs,
       cfg.cache_disk_max_mb,
     ));
+    let origin_l2 = OriginCache::new(&cfg.cache_dir, cfg.cache_disk_ttl_secs);
     Arc::new(Self {
       l1,
       l2,
+      origin_l2,
       inflight: InflightMap::new(),
       metrics,
     })
@@ -97,7 +101,7 @@ impl CacheManager {
   #[tracing::instrument(skip(self, entry), fields(key = %final_key, bytes = entry.bytes.len()))]
   pub async fn set(&self, final_key: &str, entry: CacheEntry) {
     debug!(key = %final_key, bytes = entry.bytes.len(), "storing entry to L1 and L2");
-    let _ = self.l2.set(final_key, entry.clone()).await;
+    let _ = self.l2.set(final_key, entry.clone(), None).await;
     self.l1.set(final_key.to_string(), entry).await;
     self.record_cache_sizes();
   }
@@ -117,6 +121,14 @@ impl CacheManager {
       .with_label_values(&["memory"])
       .set(self.l1.item_count() as i64);
     // disk entry count is not tracked; DiskCache does not expose it
+  }
+
+  pub async fn get_origin(&self, url: &str) -> Option<CacheEntry> {
+    self.origin_l2.get(url).await
+  }
+
+  pub async fn set_origin(&self, url: &str, entry: CacheEntry, ttl_override: Option<u64>) {
+    self.origin_l2.set(url, entry, ttl_override).await;
   }
 
   pub fn inflight(&self) -> &InflightMap {
@@ -144,5 +156,6 @@ impl CacheManager {
 
   pub async fn run_cleanup(&self) {
     let _ = self.l2.cleanup().await;
+    let _ = self.origin_l2.cleanup().await;
   }
 }
