@@ -219,6 +219,8 @@ impl ProxyService {
         drop(resp);
         // fall through to buffered path
       } else if content_type.starts_with("image/") {
+        let origin_ttl = crate::modules::cache::origin::OriginCache::extract_ttl(resp.headers());
+        let image_url_bg = image_url.clone();
         let (client_tx, client_rx) = mpsc::channel::<Bytes>(8);
         let (cache_tx, mut cache_rx) = mpsc::channel::<Result<Bytes, ProxyError>>(8);
 
@@ -275,6 +277,10 @@ impl ProxyService {
                 };
                 let key = CacheManager::preliminary_key(&canonical_bg);
                 cache.set(&key, entry.clone()).await;
+                // Also write to origin cache with TTL from response headers
+                cache
+                  .set_origin(&image_url_bg, entry.clone(), origin_ttl)
+                  .await;
                 guard.complete(Ok(entry));
                 return;
               }
@@ -299,55 +305,91 @@ impl ProxyService {
     }
     // --- End streaming path (video/PDF fell through to here) ---
 
-    // 7. Fetch
+    // Check origin cache for HTTP/S3 sources before fetching
+    let is_s3 = image_url.starts_with("s3:/");
+    let mut origin_hit = false;
+    let origin_entry_opt = if is_http || is_s3 {
+      self.cache.get_origin(&image_url).await
+    } else {
+      None
+    };
+
+    // 7. Fetch (or restore from origin cache)
     tracing::info!(url = image_url.as_str(), "fetch start");
     let download_start = Instant::now();
-    let fetch_result = self.fetcher.fetch(&image_url).await;
-    let fetch_elapsed = download_start.elapsed().as_secs_f64();
-    let source_label = if image_url.starts_with("http://") || image_url.starts_with("https://") {
-      "http"
-    } else if image_url.starts_with("s3:/") {
-      "s3"
-    } else if image_url.starts_with("local:/") {
-      "local"
+
+    let (mut src_bytes, mut src_ct) = if let Some(origin_entry) = origin_entry_opt {
+      origin_hit = true;
+      tracing::info!(
+        url = image_url.as_str(),
+        bytes = origin_entry.bytes.len(),
+        "origin cache hit - skipping fetch"
+      );
+      self
+        .metrics
+        .cache_hits_total
+        .with_label_values(&["origin"])
+        .inc();
+      (origin_entry.bytes, Some(origin_entry.content_type))
     } else {
-      "alias"
-    };
-    self
-      .metrics
-      .request_span_duration_seconds
-      .with_label_values(&["downloading"])
-      .observe(fetch_elapsed);
-    self
-      .metrics
-      .source_fetch_duration_seconds
-      .with_label_values(&[source_label])
-      .observe(fetch_elapsed);
-    let (mut src_bytes, mut src_ct) = match fetch_result {
-      Ok(v) => {
-        tracing::info!(
-          url = image_url.as_str(),
-          bytes = v.0.len(),
-          content_type = v.1.as_deref().unwrap_or(""),
-          "fetch complete"
-        );
-        v
+      let fetch_result = self.fetcher.fetch(&image_url).await;
+      let fetch_elapsed = download_start.elapsed().as_secs_f64();
+      let source_label = if image_url.starts_with("http://") || image_url.starts_with("https://") {
+        "http"
+      } else if image_url.starts_with("s3:/") {
+        "s3"
+      } else if image_url.starts_with("local:/") {
+        "local"
+      } else {
+        "alias"
+      };
+      self
+        .metrics
+        .request_span_duration_seconds
+        .with_label_values(&["downloading"])
+        .observe(fetch_elapsed);
+      self
+        .metrics
+        .source_fetch_duration_seconds
+        .with_label_values(&[source_label])
+        .observe(fetch_elapsed);
+      match fetch_result {
+        Ok(v) => {
+          tracing::info!(
+            url = image_url.as_str(),
+            bytes = v.0.len(),
+            content_type = v.1.as_deref().unwrap_or(""),
+            "fetch complete"
+          );
+          v
+        }
+        Err(e) => {
+          guard.complete(Err(e.clone()));
+          let error_type = if matches!(e, ProxyError::UpstreamTimeout) {
+            "timeout"
+          } else {
+            "downloading"
+          };
+          self
+            .metrics
+            .errors_total
+            .with_label_values(&[error_type])
+            .inc();
+          return Err(e);
+        }
       }
-      Err(e) => {
-        guard.complete(Err(e.clone()));
-        let error_type = if matches!(e, ProxyError::UpstreamTimeout) {
-          "timeout"
-        } else {
-          "downloading"
-        };
-        self
-          .metrics
-          .errors_total
-          .with_label_values(&[error_type])
-          .inc();
-        return Err(e);
-      }
     };
+    // Write raw bytes to origin cache for HTTP/S3 on fetch miss (best-effort, default TTL)
+    if (is_http || is_s3)
+      && !origin_hit
+      && let Some(ref ct) = src_ct
+    {
+      let origin_entry = crate::modules::cache::memory::CacheEntry {
+        bytes: src_bytes.clone(),
+        content_type: ct.clone(),
+      };
+      self.cache.set_origin(&image_url, origin_entry, None).await;
+    }
     self
       .metrics
       .buffer_size_bytes
