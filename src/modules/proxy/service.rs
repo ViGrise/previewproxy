@@ -22,6 +22,8 @@ pub struct ProxyService {
   cache: Arc<CacheManager>,
   allowlist: Allowlist,
   hmac_key: Option<String>,
+  source_url_encryption_key: Option<Vec<u8>>,
+  default_source_url: Option<String>,
   ffmpeg_path: String,
   ffprobe_path: String,
   max_source_bytes: u64,
@@ -41,6 +43,8 @@ impl ProxyService {
       cache: state.cache.clone(),
       allowlist,
       hmac_key: state.cfg.hmac_key.clone(),
+      source_url_encryption_key: state.cfg.source_url_encryption_key.clone(),
+      default_source_url: state.cfg.default_source_url.clone(),
       ffmpeg_path: state.cfg.ffmpeg_path.clone(),
       ffprobe_path: state.cfg.ffprobe_path.clone(),
       max_source_bytes: state.cfg.max_source_bytes,
@@ -50,6 +54,33 @@ impl ProxyService {
       best_format: state.cfg.best_format.clone(),
       metrics: state.metrics.clone(),
     }
+  }
+
+  fn resolve_url(&self, raw: &str, encrypted: bool) -> Result<String, ProxyError> {
+    use crate::modules::security::encryption;
+
+    let url = if encrypted {
+      let key = self.source_url_encryption_key.as_ref().ok_or_else(|| {
+        ProxyError::InvalidParams("source URL encryption key not configured".to_string())
+      })?;
+      encryption::decrypt(key, raw).map_err(|e| ProxyError::InvalidParams(e.to_string()))?
+    } else {
+      raw.to_string()
+    };
+
+    let has_scheme = url.contains("://") || url.contains(":/");
+    if has_scheme {
+      return Ok(url);
+    }
+
+    let base = self
+      .default_source_url
+      .as_deref()
+      .ok_or_else(|| ProxyError::InvalidParams("Invalid source URL".to_string()))?;
+
+    let base = base.trim_end_matches('/');
+    let path = url.trim_start_matches('/');
+    Ok(format!("{base}/{path}"))
   }
 
   /// Full request pipeline:
@@ -69,7 +100,8 @@ impl ProxyService {
   pub async fn process(
     &self,
     params: TransformParams,
-    image_url: String,
+    raw_url: String,
+    encrypted: bool,
     permit: OwnedSemaphorePermit,
     queued_at: Instant,
   ) -> Result<ProcessResult, ProxyError> {
@@ -101,6 +133,8 @@ impl ProxyService {
       .request_span_duration_seconds
       .with_label_values(&["queue"])
       .observe(queued_at.elapsed().as_secs_f64());
+
+    let image_url = self.resolve_url(&raw_url, encrypted)?;
 
     // 1. Allowlist check for image URL host (HTTP/HTTPS only)
     if image_url.starts_with("http://") || image_url.starts_with("https://") {
@@ -645,6 +679,7 @@ mod tests {
       fallback_image_http_code: 200,
       fallback_image_ttl: None,
       ttl: 86400,
+      default_source_url: None,
     })
   }
 
@@ -680,6 +715,8 @@ mod tests {
       cache,
       allowlist: Allowlist::new(allowed_hosts),
       hmac_key: None,
+      source_url_encryption_key: None,
+      default_source_url: None,
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
@@ -700,6 +737,7 @@ mod tests {
       .process(
         params,
         "s3:/some/key.jpg".to_string(),
+        false,
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
@@ -728,6 +766,7 @@ mod tests {
       .process(
         params,
         "s3:/images/photo.jpg".to_string(),
+        false,
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
@@ -770,6 +809,8 @@ mod tests {
       cache,
       allowlist: Allowlist::new(vec![]),
       hmac_key: None,
+      source_url_encryption_key: None,
+      default_source_url: None,
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
@@ -785,6 +826,7 @@ mod tests {
       .process(
         params,
         "s3:/v.mp4".to_string(),
+        false,
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
@@ -830,6 +872,8 @@ mod tests {
       cache,
       allowlist: Allowlist::new(vec![]),
       hmac_key: None,
+      source_url_encryption_key: None,
+      default_source_url: None,
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: 1_000_000,
@@ -844,6 +888,7 @@ mod tests {
       .process(
         params,
         "s3:/v.mp4".to_string(),
+        false,
         Arc::new(tokio::sync::Semaphore::new(1))
           .try_acquire_owned()
           .unwrap(),
@@ -913,6 +958,7 @@ mod streaming_tests {
       fallback_image_http_code: 200,
       fallback_image_ttl: None,
       ttl: 86400,
+      default_source_url: None,
     });
     let http = Arc::new(
       HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
@@ -925,6 +971,8 @@ mod streaming_tests {
       cache: cache.clone(),
       allowlist: Allowlist::new(vec![]),
       hmac_key: None,
+      source_url_encryption_key: None,
+      default_source_url: None,
       ffmpeg_path: "ffmpeg".to_string(),
       ffprobe_path: "ffprobe".to_string(),
       max_source_bytes: max_bytes,
@@ -957,6 +1005,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         server.uri(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -981,6 +1030,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         server.uri(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1007,6 +1057,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         server.uri(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1034,6 +1085,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         server.uri(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1058,6 +1110,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         url.clone(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1083,6 +1136,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         "s3:/some/key.jpg".to_string(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1107,6 +1161,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         url.clone(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1147,6 +1202,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         format!("{}/img.png", server.uri()),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1175,6 +1231,7 @@ mod streaming_tests {
       .process(
         TransformParams::default(),
         url.clone(),
+        false,
         permit(),
         std::time::Instant::now(),
       )
@@ -1192,5 +1249,181 @@ mod streaming_tests {
       entry.is_none(),
       "cache must not be written when size limit exceeded"
     );
+  }
+}
+
+#[cfg(test)]
+mod url_resolution_tests {
+  use super::*;
+
+  fn svc_with_defaults(
+    default_source_url: Option<String>,
+    enc_key: Option<Vec<u8>>,
+  ) -> ProxyService {
+    use crate::common::config::Configuration;
+    use crate::modules::cache::manager::CacheManager;
+    use crate::modules::proxy::sources::http::HttpFetcher;
+    use crate::modules::security::allowlist::Allowlist;
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    let cfg = Arc::new(Configuration {
+      env: crate::common::config::Environment::Development,
+      listen_address: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8080)),
+      app_port: 8080,
+      hmac_key: None,
+      source_url_encryption_key: enc_key.clone(),
+      allowed_hosts: vec![],
+      fetch_timeout_secs: 10,
+      fetch_retry_count: 0,
+      fetch_retry_delay_ms: 0,
+      max_source_bytes: 1_000_000,
+      cache_memory_max_mb: 16,
+      cache_memory_ttl_secs: 60,
+      cache_dir: "/tmp/previewproxy-url-test".to_string(),
+      cache_disk_ttl_secs: 60,
+      cache_disk_max_mb: None,
+      cache_cleanup_interval_secs: 600,
+      s3_enabled: false,
+      s3_bucket: None,
+      s3_region: "us-east-1".to_string(),
+      s3_access_key_id: None,
+      s3_secret_access_key: None,
+      s3_endpoint: None,
+      local_enabled: false,
+      local_base_dir: None,
+      ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
+      cors_allow_origin: vec!["*".to_string()],
+      cors_max_age_secs: 600,
+      max_concurrent_requests: 256,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
+      url_aliases: None,
+      best_format: Default::default(),
+      prometheus_bind: None,
+      prometheus_namespace: String::new(),
+      fallback_image_data: None,
+      fallback_image_path: None,
+      fallback_image_url: None,
+      fallback_image_http_code: 200,
+      fallback_image_ttl: None,
+      ttl: 86400,
+      default_source_url: default_source_url.clone(),
+    });
+    let http = Arc::new(
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+        .with_private_ip_check(false),
+    );
+    let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
+    ProxyService {
+      fetcher: http.clone(),
+      http_fetcher: http,
+      cache,
+      allowlist: Allowlist::new(vec![]),
+      hmac_key: None,
+      source_url_encryption_key: enc_key,
+      default_source_url,
+      ffmpeg_path: "ffmpeg".to_string(),
+      ffprobe_path: "ffprobe".to_string(),
+      max_source_bytes: 1_000_000,
+      input_disallow: std::collections::HashSet::new(),
+      output_disallow: std::collections::HashSet::new(),
+      transform_disallow: std::collections::HashSet::new(),
+      best_format: crate::common::config::BestFormatConfig::default(),
+      metrics: crate::modules::metrics::Metrics::new(""),
+    }
+  }
+
+  #[test]
+  fn test_resolve_url_absolute_http_unchanged() {
+    let svc = svc_with_defaults(None, None);
+    let result = svc
+      .resolve_url("https://cdn.example.com/img.jpg", false)
+      .unwrap();
+    assert_eq!(result, "https://cdn.example.com/img.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_s3_unchanged() {
+    let svc = svc_with_defaults(None, None);
+    let result = svc.resolve_url("s3:/bucket/key.jpg", false).unwrap();
+    assert_eq!(result, "s3:/bucket/key.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_local_unchanged() {
+    let svc = svc_with_defaults(None, None);
+    let result = svc.resolve_url("local:/images/img.jpg", false).unwrap();
+    assert_eq!(result, "local:/images/img.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_alias_unchanged() {
+    let svc = svc_with_defaults(None, None);
+    let result = svc.resolve_url("mycdn:/img.jpg", false).unwrap();
+    assert_eq!(result, "mycdn:/img.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_relative_prepends_base() {
+    let svc = svc_with_defaults(Some("https://cdn.example.com".to_string()), None);
+    let result = svc.resolve_url("/photo.jpg", false).unwrap();
+    assert_eq!(result, "https://cdn.example.com/photo.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_relative_base_trailing_slash() {
+    let svc = svc_with_defaults(Some("https://cdn.example.com/".to_string()), None);
+    let result = svc.resolve_url("/photo.jpg", false).unwrap();
+    assert_eq!(result, "https://cdn.example.com/photo.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_relative_no_leading_slash() {
+    let svc = svc_with_defaults(Some("https://cdn.example.com".to_string()), None);
+    let result = svc.resolve_url("photo.jpg", false).unwrap();
+    assert_eq!(result, "https://cdn.example.com/photo.jpg");
+  }
+
+  #[test]
+  fn test_resolve_url_relative_no_default_errors() {
+    let svc = svc_with_defaults(None, None);
+    let result = svc.resolve_url("/photo.jpg", false);
+    assert!(
+      matches!(result, Err(ProxyError::InvalidParams(ref m)) if m.contains("Invalid source URL")),
+      "got: {:?}",
+      result
+    );
+  }
+
+  #[test]
+  fn test_resolve_url_encrypted_decrypts() {
+    let key = b"01234567890123456789012345678901".to_vec();
+    let plaintext = "https://cdn.example.com/img.jpg";
+    let blob = crate::modules::security::encryption::encrypt(&key, plaintext).unwrap();
+    let svc = svc_with_defaults(None, Some(key));
+    let result = svc.resolve_url(&blob, true).unwrap();
+    assert_eq!(result, plaintext);
+  }
+
+  #[test]
+  fn test_resolve_url_encrypted_no_key_errors() {
+    let svc = svc_with_defaults(None, None);
+    let result = svc.resolve_url("someblob", true);
+    assert!(
+      matches!(result, Err(ProxyError::InvalidParams(ref m)) if m.contains("encryption key not configured")),
+      "got: {:?}",
+      result
+    );
+  }
+
+  #[test]
+  fn test_resolve_url_encrypted_then_relative_prepends_base() {
+    let key = b"01234567890123456789012345678901".to_vec();
+    let blob = crate::modules::security::encryption::encrypt(&key, "/photo.jpg").unwrap();
+    let svc = svc_with_defaults(Some("https://cdn.example.com".to_string()), Some(key));
+    let result = svc.resolve_url(&blob, true).unwrap();
+    assert_eq!(result, "https://cdn.example.com/photo.jpg");
   }
 }

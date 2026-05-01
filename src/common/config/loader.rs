@@ -59,6 +59,8 @@ pub struct Configuration {
   pub transform_disallow: HashSet<DisallowedTransform>,
   // URL aliases
   pub url_aliases: Option<HashMap<String, String>>,
+  // Default source URL
+  pub default_source_url: Option<String>,
   // Best format
   pub best_format: BestFormatConfig,
   // Fallback image
@@ -337,6 +339,7 @@ impl Configuration {
         &std::env::var("PP_TRANSFORM_DISALLOW_LIST").unwrap_or_default(),
       ),
       url_aliases: parse_url_aliases(&std::env::var("PP_URL_ALIASES").unwrap_or_default()),
+      default_source_url: env_var_opt("PP_DEFAULT_SOURCE_URL"),
       best_format: BestFormatConfig {
         complexity_threshold: std::env::var("PP_BEST_FORMAT_COMPLEXITY_THRESHOLD")
           .ok()
@@ -381,6 +384,18 @@ impl Configuration {
     }
     if cfg.local_enabled && cfg.local_base_dir.is_none() {
       panic!("LOCAL_ENABLED=true but LOCAL_BASE_DIR is not set");
+    }
+    if let Some(ref u) = cfg.default_source_url {
+      let valid = u.starts_with("http://")
+        || u.starts_with("https://")
+        || u.starts_with("s3:/")
+        || u.starts_with("local:/");
+      if !valid {
+        panic!(
+          "PP_DEFAULT_SOURCE_URL must start with http://, https://, s3:/, or local:/, got {:?}",
+          u
+        );
+      }
     }
     if cfg.allowed_hosts.is_empty() {
       tracing::warn!("ALLOWED_HOSTS is not set - proxying requests to any host is allowed");
@@ -480,6 +495,7 @@ impl std::fmt::Debug for Configuration {
           keys
         }),
       )
+      .field("default_source_url", &self.default_source_url)
       .field("best_format", &self.best_format)
       .field(
         "fallback_image_data",
@@ -880,6 +896,34 @@ mod tests {
     assert_eq!(cfg.fallback_image_http_code, 200);
     assert!(cfg.fallback_image_ttl.is_none());
     assert_eq!(cfg.ttl, 86400);
+  }
+
+  #[test]
+  fn test_default_source_url_unset_is_none() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PP_PORT", "8080");
+      std::env::set_var("PP_APP_ENV", "development");
+      std::env::remove_var("PP_DEFAULT_SOURCE_URL");
+    }
+    let cfg = super::Configuration::new();
+    assert!(cfg.default_source_url.is_none());
+  }
+
+  #[test]
+  fn test_default_source_url_set_is_some() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    unsafe {
+      std::env::set_var("PP_PORT", "8080");
+      std::env::set_var("PP_APP_ENV", "development");
+      std::env::set_var("PP_DEFAULT_SOURCE_URL", "https://cdn.example.com");
+    }
+    let cfg = super::Configuration::new();
+    unsafe { std::env::remove_var("PP_DEFAULT_SOURCE_URL") };
+    assert_eq!(
+      cfg.default_source_url.as_deref(),
+      Some("https://cdn.example.com")
+    );
   }
 
   #[test]

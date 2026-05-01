@@ -89,6 +89,7 @@ mod tests {
       listen_address: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8080)),
       app_port: 8080,
       hmac_key: None,
+      ttl: 86400,
       source_url_encryption_key: None,
       allowed_hosts: vec![],
       fetch_timeout_secs: 10,
@@ -118,6 +119,7 @@ mod tests {
       output_disallow: HashSet::new(),
       transform_disallow: HashSet::new(),
       url_aliases: None,
+      default_source_url: None,
       best_format: Default::default(),
       prometheus_bind: None,
       prometheus_namespace: String::new(),
@@ -126,7 +128,6 @@ mod tests {
       fallback_image_url: None,
       fallback_image_http_code: 200,
       fallback_image_ttl: None,
-      ttl: 86400,
     }
   }
 

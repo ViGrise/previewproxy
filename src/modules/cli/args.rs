@@ -9,31 +9,31 @@ pub struct Cli {
   #[arg(long, value_name = "PATH", global = true)]
   pub env_file: Option<String>,
 
-  /// Server port [env: PP_PORT]
+  /// Server port
   #[arg(short, long, env = "PP_PORT", default_value = "8080")]
   pub port: u16,
 
-  /// Environment: development or production [env: PP_APP_ENV]
+  /// Environment: development or production
   #[arg(short = 'E', long, env = "PP_APP_ENV", default_value = "development")]
   pub env: String,
 
-  /// General response TTL in seconds [env: PP_TTL]
+  /// General response TTL in seconds
   #[arg(long, env = "PP_TTL", default_value_t = 86400u64)]
   pub ttl: u64,
 
-  /// HMAC signing key (leave empty to disable) [env: PP_HMAC_KEY]
+  /// HMAC signing key (leave empty to disable)
   #[arg(short = 'k', long, env = "PP_HMAC_KEY")]
   pub hmac_key: Option<String>,
 
-  /// Comma-separated allowed upstream hosts (empty = allow all) [env: PP_ALLOWED_HOSTS]
+  /// Comma-separated allowed upstream hosts (empty = allow all)
   #[arg(short = 'a', long, env = "PP_ALLOWED_HOSTS", default_value = "")]
   pub allowed_hosts: String,
 
-  /// Upstream fetch timeout in seconds [env: PP_FETCH_TIMEOUT_SECS]
+  /// Upstream fetch timeout in seconds
   #[arg(short = 't', long, env = "PP_FETCH_TIMEOUT_SECS", default_value = "10")]
   pub fetch_timeout_secs: u64,
 
-  /// Maximum source image size in bytes [env: PP_MAX_SOURCE_BYTES]
+  /// Maximum source image size in bytes
   #[arg(
     short = 's',
     long,
@@ -42,15 +42,15 @@ pub struct Cli {
   )]
   pub max_source_bytes: u64,
 
-  /// L1 in-memory cache size in MB [env: PP_CACHE_MEMORY_MAX_MB]
+  /// L1 in-memory cache size in MB
   #[arg(long, env = "PP_CACHE_MEMORY_MAX_MB", default_value = "256")]
   pub cache_memory_max_mb: u64,
 
-  /// L1 in-memory cache TTL in seconds [env: PP_CACHE_MEMORY_TTL_SECS]
+  /// L1 in-memory cache TTL in seconds
   #[arg(long, env = "PP_CACHE_MEMORY_TTL_SECS", default_value = "3600")]
   pub cache_memory_ttl_secs: u64,
 
-  /// L2 disk cache directory [env: PP_CACHE_DIR]
+  /// L2 disk cache directory
   #[arg(
     short = 'D',
     long,
@@ -59,55 +59,59 @@ pub struct Cli {
   )]
   pub cache_dir: String,
 
-  /// L2 disk cache TTL in seconds [env: PP_CACHE_DISK_TTL_SECS]
+  /// L2 disk cache TTL in seconds
   #[arg(long, env = "PP_CACHE_DISK_TTL_SECS", default_value = "86400")]
   pub cache_disk_ttl_secs: u64,
 
-  /// L2 disk cache max size in MB (empty = unlimited) [env: PP_CACHE_DISK_MAX_MB]
+  /// L2 disk cache max size in MB (empty = unlimited)
   #[arg(long, env = "PP_CACHE_DISK_MAX_MB", default_value = "")]
   pub cache_disk_max_mb: String,
 
-  /// Cache cleanup interval in seconds [env: PP_CACHE_CLEANUP_INTERVAL_SECS]
+  /// Cache cleanup interval in seconds
   #[arg(long, env = "PP_CACHE_CLEANUP_INTERVAL_SECS", default_value = "600")]
   pub cache_cleanup_interval_secs: u64,
 
-  /// Path to the ffmpeg binary [env: PP_FFMPEG_PATH]
+  /// Path to the ffmpeg binary
   #[arg(long, env = "PP_FFMPEG_PATH", default_value = "ffmpeg")]
   pub ffmpeg_path: String,
 
-  /// Path to the ffprobe binary (defaults to ffprobe in same dir as ffmpeg) [env: PP_FFPROBE_PATH]
+  /// Path to the ffprobe binary (defaults to ffprobe in same dir as ffmpeg)
   #[arg(long, env = "PP_FFPROBE_PATH", default_value = "")]
   pub ffprobe_path: String,
 
-  /// Comma-separated allowed CORS origins; * = allow all [env: PP_CORS_ALLOW_ORIGIN]
+  /// Comma-separated allowed CORS origins; * = allow all
   #[arg(long, env = "PP_CORS_ALLOW_ORIGIN", default_value = "*")]
   pub cors_allow_origin: String,
 
-  /// CORS max-age in seconds [env: PP_CORS_MAX_AGE_SECS]
+  /// CORS max-age in seconds
   #[arg(long, env = "PP_CORS_MAX_AGE_SECS", default_value = "600")]
   pub cors_max_age_secs: u64,
 
-  /// Comma-separated input formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,pdf,psd,video) [env: PP_INPUT_DISALLOW_LIST]
+  /// Comma-separated input formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,pdf,psd,video)
   #[arg(long, env = "PP_INPUT_DISALLOW_LIST", default_value = "")]
   pub input_disallow_list: String,
 
-  /// Comma-separated output formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,ico) [env: PP_OUTPUT_DISALLOW_LIST]
+  /// Comma-separated output formats to block (jpeg,png,gif,webp,avif,jxl,bmp,tiff,ico)
   #[arg(long, env = "PP_OUTPUT_DISALLOW_LIST", default_value = "")]
   pub output_disallow_list: String,
 
-  /// Comma-separated transforms to block (resize,rotate,flip,grayscale,brightness,contrast,blur,watermark,gif_anim) [env: PP_TRANSFORM_DISALLOW_LIST]
+  /// Comma-separated transforms to block (resize,rotate,flip,grayscale,brightness,contrast,blur,watermark,gif_anim)
   #[arg(long, env = "PP_TRANSFORM_DISALLOW_LIST", default_value = "")]
   pub transform_disallow_list: String,
 
-  /// URL alias definitions: name=https://base.url,name2=https://other.url; enables name:/path scheme in requests [env: PP_URL_ALIASES]
+  /// URL alias definitions: name=https://base.url,name2=https://other.url; enables name:/path scheme in requests
   #[arg(long, env = "PP_URL_ALIASES", default_value = "")]
   pub url_aliases: String,
 
-  /// Max in-flight requests before returning 503 [env: PP_MAX_CONCURRENT_REQUESTS]
+  /// Base URL prepended to relative request paths (http://, https://, s3:/, local:/)
+  #[arg(long, env = "PP_DEFAULT_SOURCE_URL")]
+  pub default_source_url: Option<String>,
+
+  /// Max in-flight requests before returning 503
   #[arg(long, env = "PP_MAX_CONCURRENT_REQUESTS", default_value_t = 256)]
   pub max_concurrent_requests: u32,
 
-  /// Log level filter (e.g. previewproxy=info,tower_http=info) [env: RUST_LOG]
+  /// Log level filter (e.g. previewproxy=info,tower_http=info)
   #[arg(
     long,
     env = "RUST_LOG",
@@ -115,43 +119,43 @@ pub struct Cli {
   )]
   pub rust_log: String,
 
-  /// Hex-encoded AES key for encrypting/decrypting source URLs (leave empty to disable) [env: PP_SOURCE_URL_ENCRYPTION_KEY]
+  /// Hex-encoded AES key for encrypting/decrypting source URLs (leave empty to disable)
   #[arg(long, env = "PP_SOURCE_URL_ENCRYPTION_KEY")]
   pub source_url_encryption_key: Option<String>,
 
-  /// Enable S3 as an image source [env: PP_S3_ENABLED]
+  /// Enable S3 as an image source
   #[arg(long, env = "PP_S3_ENABLED", default_value_t = false)]
   pub s3_enabled: bool,
 
-  /// S3 bucket name [env: PP_S3_BUCKET]
+  /// S3 bucket name
   #[arg(long, env = "PP_S3_BUCKET", default_value = "")]
   pub s3_bucket: String,
 
-  /// S3 region [env: PP_S3_REGION]
+  /// S3 region
   #[arg(long, env = "PP_S3_REGION", default_value = "us-east-1")]
   pub s3_region: String,
 
-  /// S3 access key ID [env: PP_S3_ACCESS_KEY_ID]
+  /// S3 access key ID
   #[arg(long, env = "PP_S3_ACCESS_KEY_ID", default_value = "")]
   pub s3_access_key_id: String,
 
-  /// S3 secret access key [env: PP_S3_SECRET_ACCESS_KEY]
+  /// S3 secret access key
   #[arg(long, env = "PP_S3_SECRET_ACCESS_KEY", default_value = "")]
   pub s3_secret_access_key: String,
 
-  /// S3 custom endpoint URL (leave empty for AWS) [env: PP_S3_ENDPOINT]
+  /// S3 custom endpoint URL (leave empty for AWS)
   #[arg(long, env = "PP_S3_ENDPOINT", default_value = "")]
   pub s3_endpoint: String,
 
-  /// Enable serving images from the local filesystem [env: PP_LOCAL_ENABLED]
+  /// Enable serving images from the local filesystem
   #[arg(long, env = "PP_LOCAL_ENABLED", default_value_t = false)]
   pub local_enabled: bool,
 
-  /// Absolute path to root directory for local image files [env: PP_LOCAL_BASE_DIR]
+  /// Absolute path to root directory for local image files
   #[arg(long, env = "PP_LOCAL_BASE_DIR", default_value = "")]
   pub local_base_dir: String,
 
-  /// Edge density threshold (0-100) for best-format complexity classification [env: PP_BEST_FORMAT_COMPLEXITY_THRESHOLD]
+  /// Edge density threshold (0-100) for best-format complexity classification
   #[arg(
     long,
     env = "PP_BEST_FORMAT_COMPLEXITY_THRESHOLD",
@@ -159,19 +163,19 @@ pub struct Cli {
   )]
   pub best_format_complexity_threshold: f64,
 
-  /// Max resolution in megapixels before skipping multi-format trial (leave empty to always trial) [env: PP_BEST_FORMAT_MAX_RESOLUTION]
+  /// Max resolution in megapixels before skipping multi-format trial (leave empty to always trial)
   #[arg(long, env = "PP_BEST_FORMAT_MAX_RESOLUTION", default_value = "")]
   pub best_format_max_resolution: String,
 
-  /// Apply best-format selection for all requests that don't specify a format [env: PP_BEST_FORMAT_BY_DEFAULT]
+  /// Apply best-format selection for all requests that don't specify a format
   #[arg(long, env = "PP_BEST_FORMAT_BY_DEFAULT", default_value_t = false)]
   pub best_format_by_default: bool,
 
-  /// Skip re-encoding if selected best format matches source format and no transforms applied [env: PP_BEST_FORMAT_ALLOW_SKIPS]
+  /// Skip re-encoding if selected best format matches source format and no transforms applied
   #[arg(long, env = "PP_BEST_FORMAT_ALLOW_SKIPS", default_value_t = false)]
   pub best_format_allow_skips: bool,
 
-  /// Comma-separated formats to trial for best-format selection [env: PP_BEST_FORMAT_PREFERRED_FORMATS]
+  /// Comma-separated formats to trial for best-format selection
   #[arg(
     long,
     env = "PP_BEST_FORMAT_PREFERRED_FORMATS",
@@ -179,31 +183,31 @@ pub struct Cli {
   )]
   pub best_format_preferred_formats: String,
 
-  /// Address to expose Prometheus metrics (e.g. :9464); leave empty to disable [env: PP_PROMETHEUS_BIND]
+  /// Address to expose Prometheus metrics (e.g. :9464); leave empty to disable
   #[arg(long, env = "PP_PROMETHEUS_BIND", default_value = "")]
   pub prometheus_bind: String,
 
-  /// Prefix for all Prometheus metric names [env: PP_PROMETHEUS_NAMESPACE]
+  /// Prefix for all Prometheus metric names
   #[arg(long, env = "PP_PROMETHEUS_NAMESPACE", default_value = "")]
   pub prometheus_namespace: String,
 
-  /// Base64-encoded fallback image data [env: PP_FALLBACK_IMAGE_DATA]
+  /// Base64-encoded fallback image data
   #[arg(long, env = "PP_FALLBACK_IMAGE_DATA")]
   pub fallback_image_data: Option<String>,
 
-  /// Path to local fallback image file [env: PP_FALLBACK_IMAGE_PATH]
+  /// Path to local fallback image file
   #[arg(long, env = "PP_FALLBACK_IMAGE_PATH", default_value = "")]
   pub fallback_image_path: String,
 
-  /// URL of fallback image [env: PP_FALLBACK_IMAGE_URL]
+  /// URL of fallback image
   #[arg(long, env = "PP_FALLBACK_IMAGE_URL", default_value = "")]
   pub fallback_image_url: String,
 
-  /// HTTP status code for fallback responses; 0 = use original error code [env: PP_FALLBACK_IMAGE_HTTP_CODE]
+  /// HTTP status code for fallback responses; 0 = use original error code
   #[arg(long, env = "PP_FALLBACK_IMAGE_HTTP_CODE", default_value_t = 200u16)]
   pub fallback_image_http_code: u16,
 
-  /// TTL in seconds for fallback image responses; 0 = use PP_TTL [env: PP_FALLBACK_IMAGE_TTL]
+  /// TTL in seconds for fallback image responses; 0 = use PP_TTL
   #[arg(long, env = "PP_FALLBACK_IMAGE_TTL", default_value_t = 0u64)]
   pub fallback_image_ttl: u64,
 
@@ -254,6 +258,10 @@ impl Cli {
       std::env::set_var(
         "PP_SOURCE_URL_ENCRYPTION_KEY",
         self.source_url_encryption_key.as_deref().unwrap_or(""),
+      );
+      std::env::set_var(
+        "PP_DEFAULT_SOURCE_URL",
+        self.default_source_url.as_deref().unwrap_or(""),
       );
       std::env::set_var("PP_S3_ENABLED", self.s3_enabled.to_string());
       std::env::set_var("PP_S3_BUCKET", &self.s3_bucket);
