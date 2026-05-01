@@ -11,7 +11,6 @@ use crate::modules::proxy::{
   },
   service::ProxyService,
 };
-use crate::modules::security::encryption;
 use axum::{
   Router,
   extract::{Path, Query, State},
@@ -23,13 +22,6 @@ use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::sync::OwnedSemaphorePermit;
-
-fn decrypt_url(key: Option<&Vec<u8>>, blob: &str) -> Result<String, ProxyError> {
-  let key = key.ok_or_else(|| {
-    ProxyError::InvalidParams("source URL encryption key not configured".to_string())
-  })?;
-  encryption::decrypt(key, blob).map_err(|e| ProxyError::InvalidParams(e.to_string()))
-}
 
 /// Registers the two proxy entry points:
 /// - `GET /proxy?url=<image_url>&<params>` - query-string style
@@ -143,15 +135,12 @@ async fn handle_query_inner(
     .get("url")
     .cloned()
     .ok_or_else(|| ProxyError::InvalidParams("missing `url` query param".to_string()))?;
-  // Presence of `enc` key (any value) signals the URL is encrypted.
-  let url = if query.contains_key("enc") {
-    decrypt_url(state.cfg.source_url_encryption_key.as_ref(), &raw_url)?
-  } else {
-    raw_url
-  };
+  let encrypted = query.contains_key("enc");
   let params = from_query(&query)?;
   let service = ProxyService::new(&state);
-  let result = service.process(params, url, permit, queued_at).await;
+  let result = service
+    .process(params, raw_url, encrypted, permit, queued_at)
+    .await;
   match result {
     Ok(r) => Ok(build_response(r, &state.cfg)),
     Err(ref e) if is_upstream_error(e) => {
@@ -173,9 +162,9 @@ async fn handle_path_inner(
   queued_at: Instant,
 ) -> Result<Response, ProxyError> {
   let (mut params, raw_url) = TransformParams::from_path(&path)?;
-  let url = if raw_url.starts_with("enc/") {
-    let blob = &raw_url["enc/".len()..];
-    decrypt_url(state.cfg.source_url_encryption_key.as_ref(), blob)?
+  let encrypted = raw_url.starts_with("enc/");
+  let raw_url = if encrypted {
+    raw_url["enc/".len()..].to_string()
   } else {
     raw_url
   };
@@ -184,7 +173,9 @@ async fn handle_path_inner(
     params.merge_from(query_params);
   }
   let svc = ProxyService::new(&state);
-  let result = svc.process(params, url, permit, queued_at).await;
+  let result = svc
+    .process(params, raw_url, encrypted, permit, queued_at)
+    .await;
   match result {
     Ok(r) => Ok(build_response(r, &state.cfg)),
     Err(ref e) if is_upstream_error(e) => {
@@ -347,6 +338,7 @@ mod concurrency_tests {
       fallback_image_http_code: 200,
       fallback_image_ttl: None,
       ttl: 86400,
+      default_source_url: None,
     });
     let http = Arc::new(
       HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
@@ -739,6 +731,80 @@ mod concurrency_tests {
   }
 
   #[tokio::test]
+  async fn test_query_enc_flag_passed_as_encrypted_true() {
+    // When ?enc= is present and no key is configured, service returns 400 (proving encrypted=true was passed)
+    let state = make_state_with_enc_key(256, None);
+    let app = crate::modules::router(state);
+    let req = axum::http::Request::builder()
+      .uri("/proxy?url=anyblob&enc=1")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+  }
+
+  #[tokio::test]
+  async fn test_path_enc_prefix_passed_as_encrypted_true() {
+    let state = make_state_with_enc_key(256, None);
+    let app = crate::modules::router(state);
+    let req = axum::http::Request::builder()
+      .uri("/enc/someblob")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+  }
+
+  fn make_state_with_default_source_url(server_uri: String) -> AppState {
+    let mut cfg = (*make_state(256).cfg).clone();
+    cfg.default_source_url = Some(server_uri);
+    AppState {
+      cfg: std::sync::Arc::new(cfg),
+      ..make_state(256)
+    }
+  }
+
+  #[tokio::test]
+  async fn test_relative_url_resolved_via_default_source_url() {
+    use http_body_util::BodyExt;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_bytes(vec![1u8; 10])
+          .insert_header("content-type", "image/png"),
+      )
+      .mount(&server)
+      .await;
+
+    let state = make_state_with_default_source_url(server.uri());
+    let app = crate::modules::router(state);
+
+    let req = axum::http::Request::builder()
+      .uri("/proxy?url=%2Fimg.png")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let _ = resp.into_body().collect().await.unwrap();
+  }
+
+  #[tokio::test]
+  async fn test_relative_url_without_default_source_url_returns_400() {
+    let state = make_state(256);
+    let app = crate::modules::router(state);
+
+    let req = axum::http::Request::builder()
+      .uri("/proxy?url=%2Fimg.png")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+  }
+
+  #[tokio::test]
   async fn test_fallback_ttl_falls_back_to_pp_ttl() {
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
@@ -779,5 +845,45 @@ mod concurrency_tests {
         .and_then(|v| v.to_str().ok()),
       Some("public, max-age=1234")
     );
+  }
+
+  #[tokio::test]
+  async fn test_path_style_relative_url_resolved_via_default_source_url() {
+    use http_body_util::BodyExt;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_bytes(vec![1u8; 10])
+          .insert_header("content-type", "image/png"),
+      )
+      .mount(&server)
+      .await;
+
+    let state = make_state_with_default_source_url(server.uri());
+    let app = crate::modules::router(state);
+
+    let req = axum::http::Request::builder()
+      .uri("/build/logo.BnUd846k_Z10Q0xM.webp")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let _ = resp.into_body().collect().await.unwrap();
+  }
+
+  #[tokio::test]
+  async fn test_path_style_relative_url_without_default_source_url_returns_400() {
+    let state = make_state(256);
+    let app = crate::modules::router(state);
+
+    let req = axum::http::Request::builder()
+      .uri("/build/logo.webp")
+      .body(axum::body::Body::empty())
+      .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
   }
 }

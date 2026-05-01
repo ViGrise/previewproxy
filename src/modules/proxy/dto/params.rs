@@ -125,20 +125,22 @@ impl TransformParams {
 
     let (opts_str, url) = if let Some(pos) = split_pos {
       (&path[..pos], &path[pos + 1..])
-    } else if path.starts_with("https://")
-      || path.starts_with("http://")
-      || path.starts_with("s3:/")
-      || path.starts_with("local:/")
-      || path.starts_with("local:%2F")
-      || path.starts_with("local:%2f")
-      || path.starts_with("enc/")
-      || (path.contains(":/") && !path.contains("://"))
-    {
-      ("", path)
     } else {
-      return Err(ProxyError::InvalidParams(
-        "No image URL found in path".to_string(),
-      ));
+      // No scheme delimiter found. If the segment before the first '/' parses as
+      // valid transform options, the caller wrote e.g. `300x200/my/path.jpg` but
+      // forgot to include an absolute URL — that is ambiguous, so we error.
+      // Otherwise treat the whole path as a relative URL and let the service
+      // resolve it against PP_DEFAULT_SOURCE_URL.
+      if let Some(slash) = path.find('/') {
+        let prefix = &path[..slash];
+        if !prefix.is_empty() && parse_options(prefix).is_ok() {
+          return Err(ProxyError::InvalidParams(
+            "transform options require an absolute source URL (e.g. /300x200/https://...)"
+              .to_string(),
+          ));
+        }
+      }
+      ("", path)
     };
 
     let url = urlencoding::decode(url)
@@ -1873,5 +1875,39 @@ mod tests {
     assert_eq!(p.wmt_color, Some("ffffff".to_string()));
     assert_eq!(p.wmt_size, Some(18));
     assert_eq!(p.wmt_font, Some("sans".to_string()));
+  }
+
+  #[test]
+  fn test_relative_path_no_scheme_parsed_as_url() {
+    let (params, url) = TransformParams::from_path("build/logo.BnUd846k_Z10Q0xM.webp").unwrap();
+    assert!(params.w.is_none());
+    assert!(params.format.is_none());
+    assert_eq!(url, "build/logo.BnUd846k_Z10Q0xM.webp");
+  }
+
+  #[test]
+  fn test_relative_path_with_leading_slash_parsed_as_url() {
+    let (params, url) = TransformParams::from_path("/assets/img.png").unwrap();
+    assert!(params.w.is_none());
+    assert_eq!(url, "/assets/img.png");
+  }
+
+  #[test]
+  fn test_transforms_before_relative_path_errors() {
+    // `300x200` is valid transform syntax but there is no absolute URL after it.
+    let result = TransformParams::from_path("300x200/build/logo.webp");
+    assert!(
+      matches!(result, Err(ProxyError::InvalidParams(ref m)) if m.contains("absolute source URL")),
+      "got: {result:?}"
+    );
+  }
+
+  #[test]
+  fn test_format_transform_before_relative_path_errors() {
+    let result = TransformParams::from_path("webp/build/logo.webp");
+    assert!(
+      matches!(result, Err(ProxyError::InvalidParams(ref m)) if m.contains("absolute source URL")),
+      "got: {result:?}"
+    );
   }
 }
