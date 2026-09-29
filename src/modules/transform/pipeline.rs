@@ -178,6 +178,12 @@ pub async fn run_pipeline(
     return Ok((src_bytes, resolved_ct));
   }
 
+  // Background for flattening transparency; validated before any work is done.
+  let background = match params.bg.as_deref() {
+    Some(hex) => ops::alpha::parse_background(hex)?,
+    None => ops::alpha::DEFAULT_BACKGROUND,
+  };
+
   // 3. Fetch watermark bytes if needed (async, before spawn_blocking)
   // Disallow check for wmt (text watermark has no fetch, checked here before blocking)
   if params.wmt.is_some()
@@ -302,9 +308,10 @@ pub async fn run_pipeline(
         &best_format_cfg_clone,
         &output_disallow_clone,
         &resolved_ct_clone,
+        background,
       )
     } else {
-      ops::encode::encode(img, effective_fmt_clone.as_str(), quality)
+      ops::encode::encode_with_background(img, effective_fmt_clone.as_str(), quality, background)
     }?;
 
     // Allow-skips: if best format selected the same format as source, and no non-format transforms
@@ -866,5 +873,99 @@ mod tests {
     .await
     .unwrap();
     assert!(!out.is_empty());
+  }
+
+  /// A 16x16 PNG: an opaque blue square in the middle, transparent black around it.
+  fn transparent_logo_png() -> Vec<u8> {
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    let img = DynamicImage::ImageRgba8(ImageBuffer::from_fn(16, 16, |x, y| {
+      if (4..12).contains(&x) && (4..12).contains(&y) {
+        Rgba([0u8, 120, 255, 255])
+      } else {
+        Rgba([0u8, 0, 0, 0])
+      }
+    }));
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, ImageFormat::Png).unwrap();
+    buf.into_inner()
+  }
+
+  async fn run_transparent(params: TransformParams) -> Result<(Vec<u8>, String), ProxyError> {
+    run_pipeline(
+      params,
+      transparent_logo_png(),
+      Some("image/png".to_string()),
+      test_fetcher(),
+      &std::collections::HashSet::new(),
+      &std::collections::HashSet::new(),
+      &best_format_cfg_default(),
+    )
+    .await
+  }
+
+  #[tokio::test]
+  async fn test_default_jpeg_output_flattens_transparency_to_white() {
+    let params = TransformParams {
+      w: Some(32),
+      ..Default::default()
+    };
+    let (out, ct) = run_transparent(params).await.unwrap();
+    assert_eq!(ct, "image/jpeg");
+    let px = image::load_from_memory(&out).unwrap().to_rgb8();
+    assert!(
+      px.get_pixel(0, 0).0.iter().all(|c| *c > 240),
+      "corner is not white"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_bg_param_sets_flatten_color() {
+    let params = TransformParams {
+      w: Some(32),
+      bg: Some("ff0000".to_string()),
+      ..Default::default()
+    };
+    let (out, _) = run_transparent(params).await.unwrap();
+    let px = image::load_from_memory(&out).unwrap().to_rgb8();
+    let p = px.get_pixel(0, 0);
+    assert!(p[0] > 200 && p[1] < 60 && p[2] < 60, "{p:?}");
+  }
+
+  #[tokio::test]
+  async fn test_invalid_bg_is_rejected() {
+    let params = TransformParams {
+      w: Some(32),
+      bg: Some("nothex".to_string()),
+      ..Default::default()
+    };
+    assert!(matches!(
+      run_transparent(params).await,
+      Err(ProxyError::InvalidParams(_))
+    ));
+  }
+
+  #[tokio::test]
+  async fn test_png_output_keeps_transparency() {
+    let params = TransformParams {
+      w: Some(32),
+      format: Some("png".to_string()),
+      ..Default::default()
+    };
+    let (out, ct) = run_transparent(params).await.unwrap();
+    assert_eq!(ct, "image/png");
+    let px = image::load_from_memory(&out).unwrap().to_rgba8();
+    assert_eq!(px.get_pixel(0, 0)[3], 0);
+  }
+
+  #[tokio::test]
+  async fn test_best_format_keeps_transparency() {
+    let params = TransformParams {
+      format: Some("best".to_string()),
+      ..Default::default()
+    };
+    let (out, ct) = run_transparent(params).await.unwrap();
+    assert_ne!(ct, "image/jpeg");
+    let px = image::load_from_memory(&out).unwrap().to_rgba8();
+    assert_eq!(px.get_pixel(0, 0)[3], 0, "{ct} lost the alpha");
   }
 }

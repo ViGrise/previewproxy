@@ -1,3 +1,4 @@
+pub mod alpha;
 pub mod best_format;
 pub mod blur;
 pub mod color;

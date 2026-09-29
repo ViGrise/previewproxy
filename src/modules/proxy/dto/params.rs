@@ -58,6 +58,9 @@ pub struct TransformParams {
   pub wm_scale: Option<f32>,
   /// Text watermark content (URL-safe string). Takes lower priority than `wm`.
   pub wmt: Option<String>,
+  /// Background hex color without `#`, e.g. `ffffff` (default), used to flatten
+  /// transparency when the output format cannot store it (JPEG).
+  pub bg: Option<String>,
   /// Text watermark hex color without `#`, e.g. `ff0000` (default `000000`).
   pub wmt_color: Option<String>,
   /// Text watermark font size in pixels (default 24).
@@ -209,6 +212,9 @@ impl TransformParams {
     if other.wmt.is_some() {
       self.wmt = other.wmt;
     }
+    if other.bg.is_some() {
+      self.bg = other.bg;
+    }
     if other.wmt_color.is_some() {
       self.wmt_color = other.wmt_color;
     }
@@ -304,6 +310,9 @@ impl TransformParams {
     }
     if let Some(v) = &self.wmt {
       parts.push(format!("wmt={v}"));
+    }
+    if let Some(v) = &self.bg {
+      parts.push(format!("bg={v}"));
     }
     if let Some(v) = &self.wmt_color {
       parts.push(format!("wmt_color={v}"));
@@ -498,6 +507,11 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
       p.wmt = Some(val.to_string());
       continue;
     }
+    // bg:ffffff
+    if let Some(val) = token.strip_prefix("bg:") {
+      p.bg = Some(val.to_string());
+      continue;
+    }
     // wmt_color:ff0000
     if let Some(val) = token.strip_prefix("wmt_color:") {
       p.wmt_color = Some(val.to_string());
@@ -681,6 +695,7 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
             )
           }
           "wmt" => p.wmt = Some(val.to_string()),
+          "bg" => p.bg = Some(val.to_string()),
           "wmt_color" => p.wmt_color = Some(val.to_string()),
           "wmt_size" => {
             p.wmt_size = Some(
@@ -788,6 +803,9 @@ pub fn from_query(
   }
   if let Some(v) = query.get("wmt") {
     p.wmt = Some(v.clone());
+  }
+  if let Some(v) = query.get("bg") {
+    p.bg = Some(v.clone());
   }
   if let Some(v) = query.get("wmt_color") {
     p.wmt_color = Some(v.clone());
@@ -1909,5 +1927,36 @@ mod tests {
       matches!(result, Err(ProxyError::InvalidParams(ref m)) if m.contains("absolute source URL")),
       "got: {result:?}"
     );
+  }
+
+  #[test]
+  fn test_bg_parsed_from_path_token() {
+    let (p, _) =
+      TransformParams::from_path("300x200,bg:ff8800/https://example.com/img.png").unwrap();
+    assert_eq!(p.bg, Some("ff8800".to_string()));
+  }
+
+  #[test]
+  fn test_bg_in_canonical_string() {
+    let params = TransformParams {
+      bg: Some("ff8800".to_string()),
+      ..Default::default()
+    };
+    // The cache key must differ per background.
+    assert!(
+      params
+        .canonical_string("https://example.com/i.png")
+        .contains("bg=ff8800")
+    );
+  }
+
+  #[test]
+  fn test_bg_counts_as_no_transform_by_itself() {
+    // bg only changes how transparency is flattened, so alone it is not a transform.
+    let params = TransformParams {
+      bg: Some("ff8800".to_string()),
+      ..Default::default()
+    };
+    assert!(!params.has_transforms());
   }
 }
