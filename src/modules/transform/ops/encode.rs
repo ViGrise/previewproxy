@@ -1,13 +1,26 @@
 use crate::common::errors::ProxyError;
+use crate::modules::transform::ops::alpha;
 use bytemuck::cast_slice;
 use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
 
-#[tracing::instrument(skip(img))]
+/// Encodes with the default background for formats that cannot store alpha.
 pub fn encode(
   img: DynamicImage,
   format: &str,
   quality: u32,
+) -> Result<(Vec<u8>, String), ProxyError> {
+  encode_with_background(img, format, quality, alpha::DEFAULT_BACKGROUND)
+}
+
+/// Encodes the image. Transparency is flattened onto `background` for JPEG,
+/// which cannot store it; every other format keeps the alpha channel.
+#[tracing::instrument(skip(img))]
+pub fn encode_with_background(
+  img: DynamicImage,
+  format: &str,
+  quality: u32,
+  background: [u8; 3],
 ) -> Result<(Vec<u8>, String), ProxyError> {
   let (fmt, content_type) = match format {
     "webp" => (ImageFormat::WebP, "image/webp"),
@@ -63,6 +76,11 @@ pub fn encode(
   let mut buf = Cursor::new(Vec::new());
 
   if fmt == ImageFormat::Jpeg {
+    let img = if alpha::has_transparency(&img) {
+      alpha::flatten(&img, background)
+    } else {
+      img
+    };
     let encoder =
       image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality.clamp(1, 100) as u8);
     tracing::trace!("Encoding image to JPEG format with quality {}", quality);
@@ -148,5 +166,36 @@ mod tests {
     let (bytes, ct) = encode(img, "jxl", 85).unwrap();
     assert_eq!(ct, "image/jxl");
     assert!(!bytes.is_empty());
+  }
+
+  fn transparent_pixel_image() -> DynamicImage {
+    DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+      16,
+      16,
+      image::Rgba([0u8, 0, 0, 0]),
+    ))
+  }
+
+  #[test]
+  fn test_encode_jpeg_flattens_transparency_to_white() {
+    let (bytes, _) = encode(transparent_pixel_image(), "jpeg", 90).unwrap();
+    let px = image::load_from_memory(&bytes).unwrap().to_rgb8();
+    assert!(px.get_pixel(8, 8).0.iter().all(|c| *c > 240));
+  }
+
+  #[test]
+  fn test_encode_jpeg_uses_custom_background() {
+    let (bytes, _) =
+      encode_with_background(transparent_pixel_image(), "jpeg", 90, [255, 0, 0]).unwrap();
+    let px = image::load_from_memory(&bytes).unwrap().to_rgb8();
+    let p = px.get_pixel(8, 8);
+    assert!(p[0] > 200 && p[1] < 60 && p[2] < 60, "{p:?}");
+  }
+
+  #[test]
+  fn test_encode_png_keeps_transparency() {
+    let (bytes, _) = encode(transparent_pixel_image(), "png", 90).unwrap();
+    let decoded = image::load_from_memory(&bytes).unwrap();
+    assert!(alpha::has_transparency(&decoded));
   }
 }

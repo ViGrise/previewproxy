@@ -1,7 +1,7 @@
 use crate::common::config::BestFormatConfig;
 use crate::common::config::DisallowedOutput;
 use crate::common::errors::ProxyError;
-use crate::modules::transform::ops::encode;
+use crate::modules::transform::ops::{alpha, encode};
 use image::DynamicImage;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -9,8 +9,17 @@ use std::time::Instant;
 /// Computes the percentage of edge pixels using a Sobel scan on a downsampled luma image.
 /// Returns a value in [0, 100].
 pub fn edge_density(img: &DynamicImage) -> f64 {
-  let thumb = img.thumbnail(200, 200);
-  let luma = thumb.to_luma8();
+  // Transparent pixels usually hold black, which would read as a strong edge
+  // against any content. Measure what a viewer sees instead. Flattening comes
+  // before shrinking, since resampling straight alpha bleeds that black into
+  // the edges of the content.
+  let luma = if alpha::has_transparency(img) {
+    alpha::flatten(img, alpha::DEFAULT_BACKGROUND)
+      .thumbnail(200, 200)
+      .to_luma8()
+  } else {
+    img.thumbnail(200, 200).to_luma8()
+  };
   let (w, h) = luma.dimensions();
   if w < 3 || h < 3 {
     return 0.0;
@@ -47,6 +56,11 @@ fn format_to_disallow_token(fmt: &str) -> Option<DisallowedOutput> {
   }
 }
 
+/// Returns true for formats that cannot store transparency.
+fn drops_alpha(fmt: &str) -> bool {
+  matches!(fmt, "jpeg" | "bmp")
+}
+
 /// Returns true for lossless formats that should be skipped for complex (high-edge) images.
 fn is_lossless(fmt: &str) -> bool {
   matches!(fmt, "png" | "bmp" | "tiff")
@@ -54,6 +68,8 @@ fn is_lossless(fmt: &str) -> bool {
 
 /// Selects the best output format for `img` by:
 /// 1. Measuring edge density to classify complexity.
+///    Images with transparency never pick a format that drops it, unless every
+///    allowed format does, in which case it is flattened onto `background`.
 /// 2. If resolution exceeds `cfg.max_resolution`, picking the first allowed format (fast path).
 /// 3. Otherwise encoding all preferred candidate formats and returning the smallest.
 pub fn select_best_format(
@@ -62,6 +78,7 @@ pub fn select_best_format(
   cfg: &BestFormatConfig,
   output_disallow: &HashSet<DisallowedOutput>,
   src_content_type: &str,
+  background: [u8; 3],
 ) -> Result<(Vec<u8>, String), ProxyError> {
   let t0 = Instant::now();
   let mpx = img.width() as f64 * img.height() as f64 / 1_000_000.0;
@@ -78,14 +95,30 @@ pub fn select_best_format(
     "best_format: edge density"
   );
 
+  let has_alpha = alpha::has_transparency(img);
+
   let build_candidates = |fmts: &[String]| -> Vec<String> {
-    fmts
+    let allowed: Vec<String> = fmts
       .iter()
       .filter(|fmt| !(is_complex && is_lossless(fmt)))
       .filter(|fmt| fmt.as_str() != "gif" || src_is_gif)
       .filter(|fmt| format_to_disallow_token(fmt).is_none_or(|t| !output_disallow.contains(&t)))
       .cloned()
-      .collect()
+      .collect();
+
+    if !has_alpha {
+      return allowed;
+    }
+    let keeps_alpha: Vec<String> = allowed
+      .iter()
+      .filter(|fmt| !drops_alpha(fmt))
+      .cloned()
+      .collect();
+    if keeps_alpha.is_empty() {
+      allowed
+    } else {
+      keeps_alpha
+    }
   };
 
   // Fast path: image too large to trial-encode - pick the first allowed preferred format
@@ -99,7 +132,7 @@ pub fn select_best_format(
       elapsed_ms = t0.elapsed().as_millis(),
       "best_format: fast path selected"
     );
-    return encode::encode(img.clone(), &allowed[0], quality);
+    return encode::encode_with_background(img.clone(), &allowed[0], quality, background);
   }
 
   // Full path: encode all preferred candidates, pick smallest
@@ -113,7 +146,7 @@ pub fn select_best_format(
   let mut best: Option<(Vec<u8>, String)> = None;
   for fmt in &candidates {
     let t_enc = Instant::now();
-    match encode::encode(img.clone(), fmt, quality) {
+    match encode::encode_with_background(img.clone(), fmt, quality, background) {
       Ok(result) => {
         let is_smaller = best.as_ref().is_none_or(|(b, _)| result.0.len() < b.len());
         tracing::debug!(
@@ -189,7 +222,15 @@ mod tests {
   fn test_select_best_format_returns_bytes() {
     let img = solid_image(10);
     let cfg = BestFormatConfig::default();
-    let (bytes, ct) = select_best_format(&img, 85, &cfg, &HashSet::new(), "image/png").unwrap();
+    let (bytes, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
     assert!(!bytes.is_empty());
     assert!(ct.starts_with("image/"));
   }
@@ -198,7 +239,15 @@ mod tests {
   fn test_select_best_format_low_complexity_may_choose_png() {
     let img = solid_image(50);
     let cfg = BestFormatConfig::default();
-    let (_, ct) = select_best_format(&img, 85, &cfg, &HashSet::new(), "image/png").unwrap();
+    let (_, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
     assert!(ct.starts_with("image/"));
   }
 
@@ -210,7 +259,14 @@ mod tests {
     disallow.insert(DisallowedOutput::Jpeg);
     disallow.insert(DisallowedOutput::Webp);
     disallow.insert(DisallowedOutput::Png);
-    let result = select_best_format(&img, 85, &cfg, &disallow, "image/png");
+    let result = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &disallow,
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    );
     assert!(
       matches!(result, Err(ProxyError::TransformDisabled(_))),
       "all candidates disallowed must return TransformDisabled"
@@ -225,7 +281,15 @@ mod tests {
       ..BestFormatConfig::default()
     };
     // Non-GIF source: gif must be excluded, jpeg wins
-    let (_, ct) = select_best_format(&img, 85, &cfg, &HashSet::new(), "image/png").unwrap();
+    let (_, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
     assert_eq!(ct, "image/jpeg");
   }
 
@@ -237,7 +301,15 @@ mod tests {
       ..BestFormatConfig::default()
     };
     // GIF source: gif is allowed as a candidate
-    let (bytes, ct) = select_best_format(&img, 85, &cfg, &HashSet::new(), "image/gif").unwrap();
+    let (bytes, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/gif",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
     assert!(!bytes.is_empty());
     assert!(ct == "image/jpeg" || ct == "image/gif");
   }
@@ -249,7 +321,15 @@ mod tests {
       preferred_formats: vec!["avif".to_string(), "jxl".to_string()],
       ..BestFormatConfig::default()
     };
-    let (bytes, ct) = select_best_format(&img, 85, &cfg, &HashSet::new(), "image/png").unwrap();
+    let (bytes, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
     assert!(!bytes.is_empty());
     assert!(ct == "image/avif" || ct == "image/jxl");
   }
@@ -261,8 +341,115 @@ mod tests {
       max_resolution: Some(0.0),
       ..BestFormatConfig::default()
     };
-    let (bytes, ct) = select_best_format(&img, 85, &cfg, &HashSet::new(), "image/png").unwrap();
+    let (bytes, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
     assert!(!bytes.is_empty());
     assert!(ct.starts_with("image/"));
+  }
+
+  /// A logo-like image: opaque colored shape on a fully transparent area.
+  fn transparent_logo(size: u32) -> DynamicImage {
+    use image::Rgba;
+    DynamicImage::ImageRgba8(ImageBuffer::from_fn(size, size, |x, y| {
+      let inside = x > size / 4 && x < size * 3 / 4 && y > size / 4 && y < size * 3 / 4;
+      if inside {
+        Rgba([0u8, 160, 255, 255])
+      } else {
+        Rgba([0u8, 0, 0, 0])
+      }
+    }))
+  }
+
+  #[test]
+  fn test_transparent_image_never_picks_jpeg() {
+    let img = transparent_logo(64);
+    let cfg = BestFormatConfig::default(); // jpeg, webp, png
+    let (_, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
+    assert_ne!(ct, "image/jpeg");
+  }
+
+  #[test]
+  fn test_transparent_image_result_keeps_alpha() {
+    let img = transparent_logo(64);
+    let cfg = BestFormatConfig::default();
+    let (bytes, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
+    let decoded = image::load_from_memory(&bytes).unwrap();
+    assert!(alpha::has_transparency(&decoded), "{ct} lost the alpha");
+  }
+
+  #[test]
+  fn test_transparent_image_flattened_when_only_jpeg_allowed() {
+    let img = transparent_logo(64);
+    let cfg = BestFormatConfig {
+      preferred_formats: vec!["jpeg".to_string()],
+      ..BestFormatConfig::default()
+    };
+    let (bytes, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      [255, 255, 255],
+    )
+    .unwrap();
+    assert_eq!(ct, "image/jpeg");
+    // The corner was transparent: it must be the background, not black.
+    let corner = image::load_from_memory(&bytes).unwrap().to_rgb8();
+    assert!(corner.get_pixel(0, 0).0.iter().all(|c| *c > 240));
+  }
+
+  #[test]
+  fn test_opaque_rgba_still_may_pick_jpeg() {
+    use image::Rgba;
+    let img = DynamicImage::ImageRgba8(ImageBuffer::from_fn(32, 32, |x, y| {
+      Rgba([(x * 8) as u8, (y * 8) as u8, 128, 255])
+    }));
+    let cfg = BestFormatConfig {
+      preferred_formats: vec!["jpeg".to_string()],
+      ..BestFormatConfig::default()
+    };
+    let (_, ct) = select_best_format(
+      &img,
+      85,
+      &cfg,
+      &HashSet::new(),
+      "image/png",
+      alpha::DEFAULT_BACKGROUND,
+    )
+    .unwrap();
+    assert_eq!(ct, "image/jpeg");
+  }
+
+  #[test]
+  fn test_transparency_does_not_count_as_edges() {
+    // Same visible content: the black under transparent pixels must not add edges.
+    let logo = transparent_logo(64);
+    let flat = alpha::flatten(&logo, alpha::DEFAULT_BACKGROUND);
+    let diff = (edge_density(&logo) - edge_density(&flat)).abs();
+    assert!(diff < 0.01, "density differs by {diff}");
   }
 }
