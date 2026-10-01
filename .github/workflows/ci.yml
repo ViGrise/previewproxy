@@ -96,10 +96,26 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install pkg-config cmake nasm dav1d libheif
 
+      # The vcpkg preinstalled on windows-latest lags behind upstream, and
+      # jpegxl-sys needs libjxl >= 0.12. Pin vcpkg so the libraries come out the
+      # same on every run, whatever the runner image ships; bump the commit when
+      # a -sys crate needs newer libraries.
       - name: Install native dependencies (Windows)
         if: runner.os == 'Windows'
+        env:
+          VCPKG_COMMIT: eb2d3a3
         run: |
+          # Stop at the first failing native command. Without this a failed
+          # fetch or checkout is ignored and the old libjxl gets installed.
+          $PSNativeCommandUseErrorActionPreference = $true
           choco install pkgconfiglite -y
+          if ((git -C C:/vcpkg rev-parse --is-shallow-repository) -eq 'true') {
+            git -C C:/vcpkg fetch --unshallow origin
+          } else {
+            git -C C:/vcpkg fetch origin
+          }
+          git -C C:/vcpkg checkout $env:VCPKG_COMMIT
+          C:/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           vcpkg install dav1d libjxl libheif --triplet x64-windows-static-md
 
       - name: Build
