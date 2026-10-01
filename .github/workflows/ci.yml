@@ -118,6 +118,15 @@ jobs:
           C:/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           vcpkg install dav1d libjxl libheif --triplet x64-windows-static-md
 
+          # libjxl.pc asks for jxl-static.lib, but the vcpkg port installs it as
+          # jxl.lib. Alias it so the linker finds it.
+          $lib = 'C:/vcpkg/installed/x64-windows-static-md/lib'
+          if (-not (Test-Path "$lib/jxl-static.lib")) {
+            Copy-Item "$lib/jxl.lib" "$lib/jxl-static.lib"
+          }
+          Get-Content "$lib/pkgconfig/libjxl.pc"
+          Get-ChildItem $lib -Filter 'jxl*.lib' | Select-Object Name
+
       - name: Build
         env:
           VCPKG_ROOT: ${{ runner.os == 'Windows' && 'C:/vcpkg' || '' }}
