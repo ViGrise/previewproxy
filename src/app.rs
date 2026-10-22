@@ -24,10 +24,12 @@ pub async fn router(
 ) -> Router {
   let allowlist = Arc::new(Allowlist::new(cfg.allowed_hosts.clone()));
   let check_private = cfg.env == Environment::Production;
-  let http = Arc::new(
-    HttpFetcher::new(cfg.fetch_timeout_secs, cfg.max_source_bytes, allowlist)
-      .with_private_ip_check(check_private),
-  );
+  let http = Arc::new(HttpFetcher::new(
+    cfg.fetch_timeout_secs,
+    cfg.max_source_bytes,
+    allowlist.clone(),
+    check_private,
+  ));
   let http_fetcher = http.clone(); // clone before http is moved into SourceRouter
 
   let s3 = if cfg.s3_enabled {
@@ -59,8 +61,9 @@ pub async fn router(
         cfg.fetch_timeout_secs,
         cfg.max_source_bytes,
         Arc::new(Allowlist::new(vec![])),
+        true,
       )
-      .with_private_ip_check(false), // aliases are defined in server config, bypass SSRF
+      .with_trusted_first_hop(),
     );
     let alias_s3 = s3.clone().map(|x| x as Arc<dyn Fetchable>);
     let alias_local = local.clone().map(|x| x as Arc<dyn Fetchable>);
@@ -86,6 +89,7 @@ pub async fn router(
   let fallback = FallbackImage::load(&cfg).await;
 
   let app_state = AppState {
+    allowlist,
     cfg,
     cache,
     fetcher,

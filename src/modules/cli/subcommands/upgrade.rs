@@ -62,7 +62,7 @@ fn reexec_with_privileges(exe: &std::path::Path) -> Result<()> {
     let exe_str = exe.to_string_lossy();
     let ps_cmd = format!(
       "Start-Process -FilePath '{}' -ArgumentList 'upgrade' -Verb RunAs -Wait",
-      exe_str.replace("'", "\'")
+      exe_str.replace("'", "''")
     );
     let status = std::process::Command::new("powershell")
       .args(["-Command", &ps_cmd])

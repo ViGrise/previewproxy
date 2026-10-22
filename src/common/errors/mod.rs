@@ -11,6 +11,8 @@ use tracing::{error, warn};
 pub enum ProxyError {
   #[error("upstream_not_found")]
   UpstreamNotFound,
+  #[error("upstream_bad_status")]
+  UpstreamBadStatus,
   #[error("upstream_timeout")]
   UpstreamTimeout,
   #[error("upstream_connection_error")]
@@ -69,6 +71,7 @@ impl IntoResponse for ProxyError {
     match &self {
       ProxyError::InternalError(detail) => error!("internal_error: {}", detail),
       ProxyError::UpstreamTimeout
+      | ProxyError::UpstreamBadStatus
       | ProxyError::UpstreamConnectionError
       | ProxyError::TooManyRedirects
       | ProxyError::WatermarkFetchFailed
@@ -80,6 +83,7 @@ impl IntoResponse for ProxyError {
     let status = match &self {
       ProxyError::UpstreamNotFound => StatusCode::NOT_FOUND,
       ProxyError::UpstreamTimeout
+      | ProxyError::UpstreamBadStatus
       | ProxyError::UpstreamConnectionError
       | ProxyError::TooManyRedirects
       | ProxyError::WatermarkFetchFailed => StatusCode::BAD_GATEWAY,

@@ -391,7 +391,12 @@ fn parse_gif_anim_value(s: &str) -> Result<GifAnimRange, ProxyError> {
   Ok(GifAnimRange::From(x))
 }
 
-const MAX_DIMENSION: u32 = 8192;
+pub(crate) const MAX_IMAGE_ALLOC: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_GIF_FRAMES: usize = 256;
+const MAX_WATERMARK_SIZE: u32 = 512;
+const MAX_WATERMARK_SCALE: f32 = 1.0;
+pub(crate) const MAX_DIMENSION: u32 = 8192;
+pub(crate) const MAX_SOURCE_DIMENSION: u32 = 16384;
 const MAX_BLUR: f32 = 100.0;
 
 fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
@@ -442,10 +447,16 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
       if let Some(rel) = val.strip_suffix('r')
         && let Ok(v) = rel.parse::<f32>()
       {
+        if !v.is_finite() {
+          return Err(ProxyError::InvalidParams("invalid seek".into()));
+        }
         p.seek = Some(SeekMode::Relative(v.clamp(0.0, 1.0)));
         continue;
       }
       if let Ok(v) = val.parse::<f32>() {
+        if !v.is_finite() {
+          return Err(ProxyError::InvalidParams("invalid seek".into()));
+        }
         p.seek = Some(SeekMode::Absolute(v.max(0.0)));
         continue;
       }
@@ -654,11 +665,17 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
               let ratio = rel
                 .parse::<f32>()
                 .map_err(|_| ProxyError::InvalidParams("invalid seek".to_string()))?;
+              if !ratio.is_finite() {
+                return Err(ProxyError::InvalidParams("invalid seek".into()));
+              }
               p.seek = Some(SeekMode::Relative(ratio.clamp(0.0, 1.0)));
             } else {
               let secs = val
                 .parse::<f32>()
                 .map_err(|_| ProxyError::InvalidParams("invalid seek".to_string()))?;
+              if !secs.is_finite() {
+                return Err(ProxyError::InvalidParams("invalid seek".into()));
+              }
               p.seek = Some(SeekMode::Absolute(secs.max(0.0)));
             }
           }
@@ -717,6 +734,13 @@ fn parse_options(opts: &str) -> Result<TransformParams, ProxyError> {
       }
     }
   }
+  if p.wm_scale.is_some_and(|value| !value.is_finite()) {
+    return Err(ProxyError::InvalidParams("invalid wm_scale".into()));
+  }
+  p.wm_scale = p
+    .wm_scale
+    .map(|value| value.clamp(0.0, MAX_WATERMARK_SCALE));
+  p.wmt_size = p.wmt_size.map(|value| value.min(MAX_WATERMARK_SIZE));
   p.w = p.w.map(|v| v.min(MAX_DIMENSION));
   p.h = p.h.map(|v| v.min(MAX_DIMENSION));
   p.blur = p.blur.map(|v| v.clamp(0.0, MAX_BLUR));
@@ -832,11 +856,17 @@ pub fn from_query(
       let ratio = rel
         .parse::<f32>()
         .map_err(|_| ProxyError::InvalidParams("invalid seek".to_string()))?;
+      if !ratio.is_finite() {
+        return Err(ProxyError::InvalidParams("invalid seek".into()));
+      }
       p.seek = Some(SeekMode::Relative(ratio.clamp(0.0, 1.0)));
     } else {
       let secs = v
         .parse::<f32>()
         .map_err(|_| ProxyError::InvalidParams("invalid seek".to_string()))?;
+      if !secs.is_finite() {
+        return Err(ProxyError::InvalidParams("invalid seek".into()));
+      }
       p.seek = Some(SeekMode::Absolute(secs.max(0.0)));
     }
   }
@@ -846,6 +876,13 @@ pub fn from_query(
   if let Some(v) = query.get("gif_af") {
     p.gif_af = Some(v == "1" || v.eq_ignore_ascii_case("true"));
   }
+  if p.wm_scale.is_some_and(|value| !value.is_finite()) {
+    return Err(ProxyError::InvalidParams("invalid wm_scale".into()));
+  }
+  p.wm_scale = p
+    .wm_scale
+    .map(|value| value.clamp(0.0, MAX_WATERMARK_SCALE));
+  p.wmt_size = p.wmt_size.map(|value| value.min(MAX_WATERMARK_SIZE));
   p.w = p.w.map(|v| v.min(MAX_DIMENSION));
   p.h = p.h.map(|v| v.min(MAX_DIMENSION));
   p.blur = p.blur.map(|v| v.clamp(0.0, MAX_BLUR));
@@ -855,6 +892,24 @@ pub fn from_query(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn security_seek_and_watermark_limits() {
+    for value in ["NaN", "inf", "-inf", "NaNr"] {
+      let q = std::collections::HashMap::from([("seek".into(), value.into())]);
+      assert!(from_query(&q).is_err(), "{value}");
+      assert!(
+        TransformParams::from_path(&format!("seek:{value}/https://example.com/v.mp4")).is_err()
+      );
+    }
+    let q = std::collections::HashMap::from([
+      ("wmt_size".into(), "99999".into()),
+      ("wm_scale".into(), "999".into()),
+    ]);
+    let p = from_query(&q).unwrap();
+    assert_eq!(p.wmt_size, Some(512));
+    assert_eq!(p.wm_scale, Some(1.0));
+  }
 
   #[test]
   fn test_path_parse_basic() {

@@ -4,6 +4,16 @@ use crate::modules::proxy::sources::HttpFetcher;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub(crate) fn validate_source_path(path: &str) -> Result<(), ProxyError> {
+  let path = urlencoding::decode(path)
+    .map_err(|_| ProxyError::InvalidParams("invalid source path".into()))?;
+  let path = path.split(['?', '#']).next().unwrap_or(&path);
+  if path.contains('\\') || path.split('/').any(|segment| segment == "..") {
+    return Err(ProxyError::InvalidParams("invalid source path".into()));
+  }
+  Ok(())
+}
+
 pub struct AliasSource {
   aliases: HashMap<String, String>,
   http: Arc<HttpFetcher>,
@@ -34,6 +44,7 @@ impl AliasSource {
       .aliases
       .get(scheme)
       .ok_or_else(|| ProxyError::InvalidParams(format!("unknown alias scheme: {scheme}")))?;
+    validate_source_path(raw_path)?;
     let path = raw_path.trim_start_matches('/');
     Ok(format!("{}/{}", base.trim_end_matches('/'), path))
   }
@@ -77,7 +88,7 @@ mod tests {
 
   fn make_alias_source(aliases: Vec<(&str, &str)>) -> AliasSource {
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     );
     let map = aliases
@@ -105,7 +116,7 @@ mod tests {
     local: Option<Arc<dyn Fetchable>>,
   ) -> AliasSource {
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     );
     let map = aliases
@@ -113,6 +124,17 @@ mod tests {
       .map(|(k, v)| (k.to_string(), v.to_string()))
       .collect();
     AliasSource::new(map, http, s3, local)
+  }
+
+  #[test]
+  fn security_alias_traversal() {
+    let source = make_alias_source(vec![("cdn", "https://example.com/base")]);
+    for path in ["../secret", "%2e%2e/secret", "a\\secret", "%2E%2e/secret"] {
+      assert!(matches!(
+        source.resolve(&format!("cdn:/{path}")),
+        Err(ProxyError::InvalidParams(_))
+      ));
+    }
   }
 
   #[test]

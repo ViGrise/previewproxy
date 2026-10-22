@@ -4,17 +4,22 @@ use std::io::Cursor;
 
 /// Detect video container by magic bytes.
 pub fn is_video_magic(bytes: &[u8]) -> bool {
-  if bytes.len() >= 8 && &bytes[4..8] == b"ftyp" {
-    return true;
-  }
-  if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
-    return true;
-  }
-  if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"AVI " {
-    return true;
-  }
-  false
+  container_format(bytes).is_some()
 }
+
+fn container_format(bytes: &[u8]) -> Option<&'static str> {
+  if bytes.len() >= 8 && &bytes[4..8] == b"ftyp" {
+    Some("mov")
+  } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+    Some("matroska")
+  } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"AVI " {
+    Some("avi")
+  } else {
+    None
+  }
+}
+
+const PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Serialise DynamicImage to PNG bytes for pipeline re-entry.
 pub fn frame_to_png_bytes(img: DynamicImage) -> Result<Vec<u8>, ProxyError> {
@@ -27,9 +32,10 @@ pub fn frame_to_png_bytes(img: DynamicImage) -> Result<Vec<u8>, ProxyError> {
 
 /// Extract a single frame at t_secs from video bytes using the ffmpeg CLI.
 ///
-/// Spawns `<ffmpeg_bin> -ss <t_secs> -i <tmpfile> -vframes 1 -f image2 -vcodec png pipe:1`.
-/// Uses a fast keyframe seek (-ss before -i); the extracted frame is the nearest
-/// prior keyframe, not frame-accurate. Acceptable for preview thumbnail generation.
+/// The demuxer is selected from the container's magic bytes and input is
+/// restricted to the `file` protocol. Uses a fast keyframe seek (-ss before -i);
+/// the extracted frame is the nearest prior keyframe, which suits preview
+/// thumbnail generation.
 #[tracing::instrument(skip(bytes), fields(bytes = bytes.len(), t_secs, ffmpeg_bin))]
 pub async fn extract_frame(
   bytes: &[u8],
@@ -41,38 +47,53 @@ pub async fn extract_frame(
     ffmpeg_bin = ffmpeg_bin,
     "extract_frame start"
   );
+  let format = container_format(bytes).ok_or(ProxyError::VideoDecodeError)?;
+  if !t_secs.is_finite() {
+    return Err(ProxyError::VideoDecodeError);
+  }
   // Write bytes to a temp file. Hold the handle alive until ffmpeg exits.
   let tmp = tempfile::NamedTempFile::new().map_err(|e| ProxyError::InternalError(e.to_string()))?;
-  std::fs::write(tmp.path(), bytes).map_err(|e| ProxyError::InternalError(e.to_string()))?;
-
-  let output = tokio::process::Command::new(ffmpeg_bin)
-    .args([
-      "-ss",
-      &t_secs.to_string(),
-      "-i",
-      tmp.path().to_str().unwrap_or(""),
-      "-vframes",
-      "1",
-      "-f",
-      "image2",
-      "-vcodec",
-      "png",
-      "-loglevel",
-      "error",
-      "pipe:1",
-    ])
-    .output()
+  tokio::fs::write(tmp.path(), bytes)
     .await
-    .map_err(|e| {
-      if e.kind() == std::io::ErrorKind::NotFound {
-        tracing::warn!("ffmpeg binary not found at {ffmpeg_bin:?}: {e}");
-      } else {
-        tracing::warn!("ffmpeg spawn error: {e}");
-      }
-      ProxyError::VideoDecodeError
-    })?;
+    .map_err(|e| ProxyError::InternalError(e.to_string()))?;
 
-  // Drop tempfile after subprocess exits (explicit for clarity).
+  let output = tokio::time::timeout(
+    PROCESS_TIMEOUT,
+    tokio::process::Command::new(ffmpeg_bin)
+      .kill_on_drop(true)
+      .args([
+        "-nostdin",
+        "-protocol_whitelist",
+        "file",
+        "-f",
+        format,
+        "-ss",
+        &t_secs.to_string(),
+        "-i",
+        tmp.path().to_str().unwrap_or(""),
+        "-vframes",
+        "1",
+        "-f",
+        "image2",
+        "-vcodec",
+        "png",
+        "-loglevel",
+        "error",
+        "pipe:1",
+      ])
+      .output(),
+  )
+  .await
+  .map_err(|_| ProxyError::VideoDecodeError)?
+  .map_err(|e| {
+    if e.kind() == std::io::ErrorKind::NotFound {
+      tracing::warn!("ffmpeg binary not found at {ffmpeg_bin:?}: {e}");
+    } else {
+      tracing::warn!("ffmpeg spawn error: {e}");
+    }
+    ProxyError::VideoDecodeError
+  })?;
+
   drop(tmp);
 
   if !output.status.success() || output.stdout.is_empty() {
@@ -102,34 +123,48 @@ pub async fn extract_frame(
 
 /// Probe video duration in seconds using the ffprobe CLI.
 ///
-/// Runs: `ffprobe -v error -show_entries format=duration -of csv=p=0 <tmpfile>`
-/// Returns `ProxyError::VideoDecodeError` if ffprobe fails or output cannot be parsed.
+/// The demuxer is selected from the container's magic bytes and input is
+/// restricted to the `file` protocol. Returns `ProxyError::VideoDecodeError`
+/// if ffprobe fails or output cannot be parsed.
 #[tracing::instrument(skip(bytes), fields(bytes = bytes.len(), ffprobe_bin))]
 pub async fn probe_duration(bytes: &[u8], ffprobe_bin: &str) -> Result<f32, ProxyError> {
+  let format = container_format(bytes).ok_or(ProxyError::VideoDecodeError)?;
   tracing::debug!(ffprobe_bin = ffprobe_bin, "probe_duration start");
   let tmp = tempfile::NamedTempFile::new().map_err(|e| ProxyError::InternalError(e.to_string()))?;
-  std::fs::write(tmp.path(), bytes).map_err(|e| ProxyError::InternalError(e.to_string()))?;
-
-  let output = tokio::process::Command::new(ffprobe_bin)
-    .args([
-      "-v",
-      "error",
-      "-show_entries",
-      "format=duration",
-      "-of",
-      "csv=p=0",
-      tmp.path().to_str().unwrap_or(""),
-    ])
-    .output()
+  tokio::fs::write(tmp.path(), bytes)
     .await
-    .map_err(|e| {
-      if e.kind() == std::io::ErrorKind::NotFound {
-        tracing::warn!("ffprobe binary not found at {ffprobe_bin:?}: {e}");
-      } else {
-        tracing::warn!("ffprobe spawn error: {e}");
-      }
-      ProxyError::VideoDecodeError
-    })?;
+    .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+
+  let output = tokio::time::timeout(
+    PROCESS_TIMEOUT,
+    tokio::process::Command::new(ffprobe_bin)
+      .kill_on_drop(true)
+      .stdin(std::process::Stdio::null())
+      .args([
+        "-protocol_whitelist",
+        "file",
+        "-f",
+        format,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "csv=p=0",
+        tmp.path().to_str().unwrap_or(""),
+      ])
+      .output(),
+  )
+  .await
+  .map_err(|_| ProxyError::VideoDecodeError)?
+  .map_err(|e| {
+    if e.kind() == std::io::ErrorKind::NotFound {
+      tracing::warn!("ffprobe binary not found at {ffprobe_bin:?}: {e}");
+    } else {
+      tracing::warn!("ffprobe spawn error: {e}");
+    }
+    ProxyError::VideoDecodeError
+  })?;
 
   drop(tmp);
 
@@ -160,6 +195,57 @@ pub async fn probe_duration(bytes: &[u8], ffprobe_bin: &str) -> Result<f32, Prox
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn security_explicit_demuxer_and_protocols() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("media-tool");
+    std::fs::write(
+      &executable,
+      b"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (bytes, format) in [
+      (b"\0\0\0\x18ftypisom".as_slice(), "mov"),
+      (b"\x1a\x45\xdf\xa3".as_slice(), "matroska"),
+      (b"RIFF0000AVI ".as_slice(), "avi"),
+    ] {
+      assert!(
+        extract_frame(bytes, 0.0, executable.to_str().unwrap())
+          .await
+          .is_err()
+      );
+      let args = std::fs::read_to_string(dir.path().join("media-tool.args")).unwrap();
+      let args: Vec<_> = args.lines().collect();
+      assert!(args.contains(&"-nostdin"));
+      assert!(
+        args
+          .windows(2)
+          .any(|pair| pair == ["-protocol_whitelist", "file"])
+      );
+      let demuxer = args
+        .windows(2)
+        .position(|pair| pair == ["-f", format])
+        .unwrap();
+      assert!(demuxer < args.iter().position(|arg| *arg == "-i").unwrap());
+      assert!(
+        probe_duration(bytes, executable.to_str().unwrap())
+          .await
+          .is_err()
+      );
+      let args = std::fs::read_to_string(dir.path().join("media-tool.args")).unwrap();
+      let args: Vec<_> = args.lines().collect();
+      assert!(
+        args
+          .windows(2)
+          .any(|pair| pair == ["-protocol_whitelist", "file"])
+      );
+      assert!(args.windows(2).any(|pair| pair == ["-f", format]));
+    }
+  }
 
   #[test]
   fn test_is_video_magic_mp4() {

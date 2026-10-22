@@ -20,7 +20,7 @@ pub struct ProxyService {
   fetcher: Arc<dyn Fetchable>,
   http_fetcher: Arc<crate::modules::proxy::sources::http::HttpFetcher>,
   cache: Arc<CacheManager>,
-  allowlist: Allowlist,
+  allowlist: Arc<Allowlist>,
   hmac_key: Option<String>,
   source_url_encryption_key: Option<Vec<u8>>,
   default_source_url: Option<String>,
@@ -36,7 +36,7 @@ pub struct ProxyService {
 
 impl ProxyService {
   pub fn new(state: &AppState) -> Self {
-    let allowlist = Allowlist::new(state.cfg.allowed_hosts.clone());
+    let allowlist = state.allowlist.clone();
     Self {
       fetcher: state.fetcher.clone(),
       http_fetcher: state.http_fetcher.clone(),
@@ -60,10 +60,12 @@ impl ProxyService {
     use crate::modules::security::encryption;
 
     let url = if encrypted {
-      let key = self.source_url_encryption_key.as_ref().ok_or_else(|| {
-        ProxyError::InvalidParams("source URL encryption key not configured".to_string())
-      })?;
-      encryption::decrypt(key, raw).map_err(|e| ProxyError::InvalidParams(e.to_string()))?
+      let key = self
+        .source_url_encryption_key
+        .as_ref()
+        .ok_or_else(|| ProxyError::InvalidParams("invalid encrypted url".into()))?;
+      encryption::decrypt(key, raw)
+        .map_err(|_| ProxyError::InvalidParams("invalid encrypted url".into()))?
     } else {
       raw.to_string()
     };
@@ -78,6 +80,7 @@ impl ProxyService {
       .as_deref()
       .ok_or_else(|| ProxyError::InvalidParams("Invalid source URL".to_string()))?;
 
+    crate::modules::proxy::sources::alias::validate_source_path(&url)?;
     let base = base.trim_end_matches('/');
     let path = url.trim_start_matches('/');
     Ok(format!("{base}/{path}"))
@@ -95,8 +98,8 @@ impl ProxyService {
   /// 6. **Buffered path**: fetch full source bytes, run the transform
   ///    pipeline, store the result in cache, return `ProcessResult::Cached`
   ///
-  /// Video and PDF sources always take the buffered path regardless of whether
-  /// transforms are requested.
+  /// Video and PDF sources always take the buffered path, with or without
+  /// requested transforms.
   pub async fn process(
     &self,
     params: TransformParams,
@@ -170,7 +173,7 @@ impl ProxyService {
       }
     }
 
-    // 3. Compute canonical once (Issue 3 fix)
+    // 3. Compute canonical once
     let canonical = params.canonical_string(&image_url);
 
     // 4. HMAC check: if self.hmac_key is Some, verify params.sig against canonical_string
@@ -255,17 +258,25 @@ impl ProxyService {
       } else if content_type.starts_with("image/") {
         let origin_ttl = crate::modules::cache::origin::OriginCache::extract_ttl(resp.headers());
         let image_url_bg = image_url.clone();
-        let (client_tx, client_rx) = mpsc::channel::<Bytes>(8);
+        let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, ProxyError>>(8);
         let (cache_tx, mut cache_rx) = mpsc::channel::<Result<Bytes, ProxyError>>(8);
 
-        // Tee task: drives reqwest body -> both channels
+        let max_bytes = self.max_source_bytes;
+        // Tee task: drives reqwest body -> both channels, bounded by max_bytes
         tokio::spawn(async move {
           use futures::StreamExt;
           let mut s = resp.bytes_stream();
+          let mut forwarded = 0u64;
           while let Some(chunk) = s.next().await {
             match chunk {
               Ok(b) => {
-                if client_tx.send(b.clone()).await.is_err() {
+                forwarded = forwarded.saturating_add(b.len() as u64);
+                if forwarded > max_bytes {
+                  let _ = client_tx.send(Err(ProxyError::SourceTooLarge)).await;
+                  let _ = cache_tx.send(Err(ProxyError::SourceTooLarge)).await;
+                  return;
+                }
+                if client_tx.send(Ok(b.clone())).await.is_err() {
                   let _ = cache_tx
                     .send(Err(ProxyError::InternalError(
                       "client_disconnected".to_string(),
@@ -277,6 +288,7 @@ impl ProxyService {
               }
               Err(e) => {
                 let pe = ProxyError::InternalError(e.to_string());
+                let _ = client_tx.send(Err(pe.clone())).await;
                 let _ = cache_tx.send(Err(pe)).await;
                 return;
               }
@@ -323,9 +335,7 @@ impl ProxyService {
         });
 
         let stream = futures::stream::unfold((client_rx, permit), |(mut rx, permit)| async move {
-          rx.recv()
-            .await
-            .map(|b| (Ok::<Bytes, ProxyError>(b), (rx, permit)))
+          rx.recv().await.map(|b| (b, (rx, permit)))
         });
 
         return Ok(ProcessResult::Stream {
@@ -587,13 +597,13 @@ impl ProxyService {
       }
     };
 
-    // 9. Write to cache
+    // 11. Write to cache
     self.cache.set(&prelim_key, entry.clone()).await;
 
-    // 10. Call guard.complete(Ok(entry.clone()))
+    // 12. Call guard.complete(Ok(entry.clone()))
     guard.complete(Ok(entry.clone()));
 
-    // 11. Return Ok(ProcessResult::Cached(entry, CacheHit::Miss))
+    // 13. Return Ok(ProcessResult::Cached(entry, CacheHit::Miss))
     Ok(ProcessResult::Cached(entry, CacheHit::Miss))
   }
 
@@ -709,11 +719,12 @@ mod tests {
           10,
           1_000_000,
           Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![])),
+          true,
         )
         .with_private_ip_check(false),
       ),
       cache,
-      allowlist: Allowlist::new(allowed_hosts),
+      allowlist: Arc::new(Allowlist::new(allowed_hosts)),
       hmac_key: None,
       source_url_encryption_key: None,
       default_source_url: None,
@@ -803,11 +814,12 @@ mod tests {
           10,
           1_000_000,
           Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![])),
+          true,
         )
         .with_private_ip_check(false),
       ),
       cache,
-      allowlist: Allowlist::new(vec![]),
+      allowlist: Arc::new(Allowlist::new(vec![])),
       hmac_key: None,
       source_url_encryption_key: None,
       default_source_url: None,
@@ -866,11 +878,12 @@ mod tests {
           10,
           1_000_000,
           Arc::new(crate::modules::security::allowlist::Allowlist::new(vec![])),
+          true,
         )
         .with_private_ip_check(false),
       ),
       cache,
-      allowlist: Allowlist::new(vec![]),
+      allowlist: Arc::new(Allowlist::new(vec![])),
       hmac_key: None,
       source_url_encryption_key: None,
       default_source_url: None,
@@ -913,6 +926,51 @@ mod streaming_tests {
   use std::sync::Arc;
   use tokio::sync::Semaphore;
   use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+  #[tokio::test]
+  async fn security_chunked_stream_limit() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+      let (mut socket, _) = listener.accept().await.unwrap();
+      let mut request = [0; 4096];
+      let _request_len = socket.read(&mut request).await.unwrap();
+      let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nc8\r\n{}\r\n0\r\n\r\n",
+        "a".repeat(200)
+      );
+      socket.write_all(response.as_bytes()).await.unwrap();
+    });
+    let (svc, cache) = make_svc(50);
+    let url = format!("http://{address}/image.png");
+    let result = svc
+      .process(
+        TransformParams::default(),
+        url.clone(),
+        false,
+        permit(),
+        std::time::Instant::now(),
+      )
+      .await
+      .unwrap();
+    let ProcessResult::Stream { mut body, .. } = result else {
+      panic!("expected stream")
+    };
+    let mut forwarded = 0;
+    let mut exceeded = false;
+    while let Some(chunk) = body.next().await {
+      match chunk {
+        Ok(bytes) => forwarded += bytes.len(),
+        Err(ProxyError::SourceTooLarge) => exceeded = true,
+        Err(error) => panic!("unexpected error: {error}"),
+      }
+    }
+    assert!(exceeded);
+    assert!(forwarded <= 50);
+    let key = CacheManager::preliminary_key(&TransformParams::default().canonical_string(&url));
+    assert!(cache.get(&key).await.0.is_none());
+  }
 
   fn make_svc(max_bytes: u64) -> (ProxyService, Arc<CacheManager>) {
     let cfg = Arc::new(crate::common::config::Configuration {
@@ -961,7 +1019,7 @@ mod streaming_tests {
       default_source_url: None,
     });
     let http = Arc::new(
-      HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, max_bytes, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     );
     let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
@@ -969,7 +1027,7 @@ mod streaming_tests {
       fetcher: http.clone(),
       http_fetcher: http,
       cache: cache.clone(),
-      allowlist: Allowlist::new(vec![]),
+      allowlist: Arc::new(Allowlist::new(vec![])),
       hmac_key: None,
       source_url_encryption_key: None,
       default_source_url: None,
@@ -1235,20 +1293,12 @@ mod streaming_tests {
         permit(),
         std::time::Instant::now(),
       )
-      .await
-      .unwrap();
-    if let ProcessResult::Stream { mut body, .. } = result {
-      while body.next().await.is_some() {}
-      drop(body);
-      tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
+      .await;
+    assert!(matches!(result, Err(ProxyError::SourceTooLarge)));
     let canonical = TransformParams::default().canonical_string(&url);
     let prelim_key = CacheManager::preliminary_key(&canonical);
     let (entry, _) = cache.get(&prelim_key).await;
-    assert!(
-      entry.is_none(),
-      "cache must not be written when size limit exceeded"
-    );
+    assert!(entry.is_none());
   }
 }
 
@@ -1312,7 +1362,7 @@ mod url_resolution_tests {
       default_source_url: default_source_url.clone(),
     });
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     );
     let cache = CacheManager::new(&cfg, crate::modules::metrics::Metrics::new(""));
@@ -1320,7 +1370,7 @@ mod url_resolution_tests {
       fetcher: http.clone(),
       http_fetcher: http,
       cache,
-      allowlist: Allowlist::new(vec![]),
+      allowlist: Arc::new(Allowlist::new(vec![])),
       hmac_key: None,
       source_url_encryption_key: enc_key,
       default_source_url,
@@ -1332,6 +1382,22 @@ mod url_resolution_tests {
       transform_disallow: std::collections::HashSet::new(),
       best_format: crate::common::config::BestFormatConfig::default(),
       metrics: crate::modules::metrics::Metrics::new(""),
+    }
+  }
+
+  #[test]
+  fn security_default_path_and_encryption_errors() {
+    let svc = svc_with_defaults(Some("https://example.com/base".into()), Some(vec![0; 32]));
+    for path in ["../secret", "%2e%2e/secret", "a\\secret"] {
+      assert!(matches!(
+        svc.resolve_url(path, false),
+        Err(ProxyError::InvalidParams(_))
+      ));
+    }
+    for blob in ["!", "AAAA", ""] {
+      assert!(
+        matches!(svc.resolve_url(blob, true), Err(ProxyError::InvalidParams(m)) if m == "invalid encrypted url")
+      );
     }
   }
 
@@ -1412,7 +1478,7 @@ mod url_resolution_tests {
     let svc = svc_with_defaults(None, None);
     let result = svc.resolve_url("someblob", true);
     assert!(
-      matches!(result, Err(ProxyError::InvalidParams(ref m)) if m.contains("encryption key not configured")),
+      matches!(result, Err(ProxyError::InvalidParams(ref m)) if m == "invalid encrypted url"),
       "got: {:?}",
       result
     );
