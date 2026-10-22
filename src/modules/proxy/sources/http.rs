@@ -2,17 +2,73 @@ use crate::common::errors::ProxyError;
 use crate::modules::proxy::fetchable::Fetchable;
 use crate::modules::security::allowlist::{Allowlist, is_private_ip};
 use futures::StreamExt;
-use reqwest::Client;
-use std::{sync::Arc, time::Duration};
+use reqwest::{
+  Client,
+  dns::{Addrs, Name, Resolve, Resolving},
+};
+use std::{error::Error, sync::Arc, time::Duration};
+
+#[derive(Debug, thiserror::Error)]
+enum FetchPolicyError {
+  #[error("host not allowed")]
+  HostNotAllowed,
+  #[error("too many redirects")]
+  TooManyRedirects,
+}
+
+struct PublicResolver;
+
+impl Resolve for PublicResolver {
+  fn resolve(&self, name: Name) -> Resolving {
+    Box::pin(async move {
+      let addresses: Vec<_> = tokio::net::lookup_host((name.as_str(), 0)).await?.collect();
+      if addresses.is_empty() || addresses.iter().any(|addr| is_private_ip(addr.ip())) {
+        return Err(Box::new(FetchPolicyError::HostNotAllowed) as Box<dyn Error + Send + Sync>);
+      }
+      Ok(Box::new(addresses.into_iter()) as Addrs)
+    })
+  }
+}
+
+fn private_literal(url: &url::Url) -> bool {
+  match url.host() {
+    Some(url::Host::Ipv4(ip)) => is_private_ip(ip.into()),
+    Some(url::Host::Ipv6(ip)) => is_private_ip(ip.into()),
+    _ => false,
+  }
+}
+
+fn map_send_error(error: reqwest::Error) -> ProxyError {
+  let mut source: Option<&(dyn Error + 'static)> = Some(&error);
+  while let Some(current) = source {
+    if let Some(policy) = current.downcast_ref::<FetchPolicyError>() {
+      return match policy {
+        FetchPolicyError::HostNotAllowed => ProxyError::HostNotAllowed,
+        FetchPolicyError::TooManyRedirects => ProxyError::TooManyRedirects,
+      };
+    }
+    source = current.source();
+  }
+  if error.is_timeout() {
+    ProxyError::UpstreamTimeout
+  } else {
+    ProxyError::UpstreamConnectionError
+  }
+}
 
 /// HTTP/HTTPS source fetcher with SSRF protection, allowlist enforcement,
 /// redirect validation, and body size limiting.
 ///
-/// Private IP checks run both at DNS resolution time and on each redirect hop.
-/// `check_private_ips` is disabled in development to allow loopback test servers.
+/// When `check_private_ips` is set, the DNS resolver rejects private and
+/// non-routable addresses at connection time, which covers every redirect hop,
+/// and private IP literals are rejected before each request. Development mode
+/// turns the check off so loopback test servers stay reachable.
 pub struct HttpFetcher {
   client: Client,
+  trusted_client: Option<Client>,
   max_bytes: u64,
+  timeout_secs: u64,
+  allowlist: Arc<Allowlist>,
   check_private_ips: bool,
 }
 
@@ -26,177 +82,139 @@ impl Fetchable for HttpFetcher {
 impl HttpFetcher {
   pub fn with_private_ip_check(mut self, check: bool) -> Self {
     self.check_private_ips = check;
+    self.client = Self::build_client(self.timeout_secs, self.allowlist.clone(), check);
     self
   }
 
-  pub fn new(timeout_secs: u64, max_bytes: u64, allowlist: Arc<Allowlist>) -> Self {
-    let al = allowlist.clone();
-    let redirect_policy = reqwest::redirect::Policy::custom(move |attempt| {
-      if attempt.previous().len() >= 5 {
-        return attempt.error("too_many_redirects");
-      }
-      let url = attempt.url();
-      let host = url.host_str().unwrap_or("");
-      if !al.is_allowed(host) {
-        return attempt.error("host_not_allowed");
-      }
-      if let Ok(addrs) = tokio::task::block_in_place(|| {
-        std::net::ToSocketAddrs::to_socket_addrs(&(host.to_string(), 80u16))
-      }) {
-        for addr in addrs {
-          if is_private_ip(addr.ip()) {
-            return attempt.error("host_not_allowed");
-          }
-        }
-      }
-      attempt.follow()
-    });
+  pub fn with_trusted_first_hop(mut self) -> Self {
+    self.trusted_client = Some(
+      Client::builder()
+        .timeout(Duration::from_secs(self.timeout_secs))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("ViGrise-PreviewProxy/1.0")
+        .build()
+        .expect("valid HTTP client"),
+    );
+    self
+  }
 
-    let client = Client::builder()
-      .timeout(Duration::from_secs(timeout_secs))
-      .redirect(redirect_policy)
-      .user_agent("ViGrise-PreviewProxy/1.0")
-      .build()
-      .expect("Failed to build reqwest client");
-
+  pub fn new(
+    timeout_secs: u64,
+    max_bytes: u64,
+    allowlist: Arc<Allowlist>,
+    check_private_ips: bool,
+  ) -> Self {
     Self {
-      client,
+      client: Self::build_client(timeout_secs, allowlist.clone(), check_private_ips),
+      trusted_client: None,
       max_bytes,
-      check_private_ips: true,
+      timeout_secs,
+      allowlist,
+      check_private_ips,
     }
   }
 
-  #[tracing::instrument(skip(self), fields(url))]
-  async fn fetch_url(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
-    if self.check_private_ips {
-      let parsed =
-        url::Url::parse(url).map_err(|_| ProxyError::InvalidParams("invalid URL".to_string()))?;
-      let host = parsed.host_str().unwrap_or("");
-      if let Ok(addrs) = tokio::net::lookup_host(format!("{}:80", host)).await {
-        for addr in addrs {
-          if is_private_ip(addr.ip()) {
+  fn build_client(timeout_secs: u64, allowlist: Arc<Allowlist>, check: bool) -> Client {
+    let policy = reqwest::redirect::Policy::custom(move |attempt| {
+      if attempt.previous().len() >= 5 {
+        return attempt.error(FetchPolicyError::TooManyRedirects);
+      }
+      let url = attempt.url();
+      if !allowlist.is_allowed(url.host_str().unwrap_or("")) || (check && private_literal(url)) {
+        return attempt.error(FetchPolicyError::HostNotAllowed);
+      }
+      attempt.follow()
+    });
+    let mut builder = Client::builder()
+      .timeout(Duration::from_secs(timeout_secs))
+      .redirect(policy)
+      .user_agent("ViGrise-PreviewProxy/1.0");
+    if check {
+      // Direct connections keep address validation on the connection's DNS path.
+      builder = builder.no_proxy().dns_resolver(Arc::new(PublicResolver));
+    }
+    builder.build().expect("valid HTTP client")
+  }
+
+  async fn send_checked(&self, url: &str) -> Result<reqwest::Response, ProxyError> {
+    let parsed =
+      url::Url::parse(url).map_err(|_| ProxyError::InvalidParams("invalid URL".into()))?;
+    let resp = if let Some(client) = &self.trusted_client {
+      let first = client.get(parsed).send().await.map_err(map_send_error)?;
+      if first.status().is_redirection() {
+        if let Some(location) = first.headers().get(reqwest::header::LOCATION) {
+          let next = first
+            .url()
+            .join(
+              location
+                .to_str()
+                .map_err(|_| ProxyError::UpstreamConnectionError)?,
+            )
+            .map_err(|_| ProxyError::UpstreamConnectionError)?;
+          if self.check_private_ips && private_literal(&next) {
             return Err(ProxyError::HostNotAllowed);
           }
-        }
-      }
-    }
-
-    let resp = self.client.get(url).send().await.map_err(|e| {
-      if e.is_timeout() {
-        ProxyError::UpstreamTimeout
-      } else if e.is_connect() {
-        ProxyError::UpstreamConnectionError
-      } else if e.is_redirect() {
-        ProxyError::TooManyRedirects
-      } else {
-        let msg = e.to_string();
-        if msg.contains("too_many_redirects") {
-          ProxyError::TooManyRedirects
-        } else if msg.contains("host_not_allowed") {
-          ProxyError::HostNotAllowed
+          if !self.allowlist.is_allowed(next.host_str().unwrap_or("")) {
+            return Err(ProxyError::HostNotAllowed);
+          }
+          self.client.get(next).send().await.map_err(map_send_error)?
         } else {
-          ProxyError::InternalError(msg)
+          first
         }
+      } else {
+        first
       }
-    })?;
-
+    } else {
+      if !self.allowlist.is_allowed(parsed.host_str().unwrap_or(""))
+        || (self.check_private_ips && private_literal(&parsed))
+      {
+        return Err(ProxyError::HostNotAllowed);
+      }
+      self
+        .client
+        .get(parsed)
+        .send()
+        .await
+        .map_err(map_send_error)?
+    };
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
       return Err(ProxyError::UpstreamNotFound);
     }
     if !resp.status().is_success() {
-      return Err(ProxyError::InternalError(format!(
-        "Upstream returned {}",
-        resp.status()
-      )));
+      return Err(ProxyError::UpstreamBadStatus);
     }
+    if resp
+      .content_length()
+      .is_some_and(|len| len > self.max_bytes)
+    {
+      return Err(ProxyError::SourceTooLarge);
+    }
+    Ok(resp)
+  }
 
+  async fn fetch_url(&self, url: &str) -> Result<(Vec<u8>, Option<String>), ProxyError> {
+    let resp = self.send_checked(url).await?;
     let content_type = resp
       .headers()
       .get(reqwest::header::CONTENT_TYPE)
       .and_then(|v| v.to_str().ok())
       .map(|s| s.split(';').next().unwrap_or(s).trim().to_string());
-
-    let bytes = self.read_body_limited(resp).await?;
-    tracing::debug!(
-      url = url,
-      bytes = bytes.len(),
-      content_type = content_type.as_deref().unwrap_or(""),
-      "HTTP fetch complete"
-    );
-    Ok((bytes, content_type))
-  }
-
-  async fn read_body_limited(&self, resp: reqwest::Response) -> Result<Vec<u8>, ProxyError> {
     let mut stream = resp.bytes_stream();
-    let mut buf: Vec<u8> = Vec::new();
+    let mut buf = Vec::new();
     while let Some(chunk) = stream.next().await {
-      let chunk = chunk.map_err(|e| {
-        if e.is_body() || e.is_connect() {
-          ProxyError::UpstreamConnectionError
-        } else {
-          ProxyError::InternalError(e.to_string())
-        }
-      })?;
-      buf.extend_from_slice(&chunk);
-      if buf.len() as u64 > self.max_bytes {
+      let chunk = chunk.map_err(map_send_error)?;
+      if (buf.len() as u64).saturating_add(chunk.len() as u64) > self.max_bytes {
         return Err(ProxyError::SourceTooLarge);
       }
+      buf.extend_from_slice(&chunk);
     }
-    Ok(buf)
+    Ok((buf, content_type))
   }
 
   /// Returns the reqwest::Response after header checks, without reading the body.
   /// Caller is responsible for reading or streaming the body.
-  #[tracing::instrument(skip(self), fields(url))]
   pub async fn fetch_streaming(&self, url: &str) -> Result<reqwest::Response, ProxyError> {
-    if self.check_private_ips {
-      let parsed =
-        url::Url::parse(url).map_err(|_| ProxyError::InvalidParams("invalid URL".to_string()))?;
-      let host = parsed.host_str().unwrap_or("");
-      if let Ok(addrs) = tokio::net::lookup_host(format!("{}:80", host)).await {
-        for addr in addrs {
-          if is_private_ip(addr.ip()) {
-            return Err(ProxyError::HostNotAllowed);
-          }
-        }
-      }
-    }
-
-    let resp = self.client.get(url).send().await.map_err(|e| {
-      if e.is_timeout() {
-        ProxyError::UpstreamTimeout
-      } else if e.is_connect() {
-        ProxyError::UpstreamConnectionError
-      } else if e.is_redirect() {
-        ProxyError::TooManyRedirects
-      } else {
-        let msg = e.to_string();
-        if msg.contains("too_many_redirects") {
-          ProxyError::TooManyRedirects
-        } else if msg.contains("host_not_allowed") {
-          ProxyError::HostNotAllowed
-        } else {
-          ProxyError::InternalError(msg)
-        }
-      }
-    })?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-      return Err(ProxyError::UpstreamNotFound);
-    }
-    if !resp.status().is_success() {
-      return Err(ProxyError::InternalError(format!(
-        "Upstream returned {}",
-        resp.status()
-      )));
-    }
-
-    tracing::debug!(
-      url = url,
-      status = resp.status().as_u16(),
-      "HTTP streaming fetch response received"
-    );
-    Ok(resp)
+    self.send_checked(url).await
   }
 }
 
@@ -207,8 +225,83 @@ mod tests {
   use std::sync::Arc;
   use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
+  #[tokio::test]
+  async fn security_private_literals_and_dns() {
+    let fetcher = HttpFetcher::new(2, 1000, Arc::new(Allowlist::new(vec![])), true);
+    for url in [
+      "http://127.0.0.1",
+      "http://[::1]",
+      "http://[::ffff:127.0.0.1]",
+      "http://localhost",
+    ] {
+      assert!(
+        matches!(fetcher.fetch(url).await, Err(ProxyError::HostNotAllowed)),
+        "{url}"
+      );
+    }
+    assert!(fetcher.fetch("http://invalid.invalid").await.is_err());
+  }
+
+  #[tokio::test]
+  async fn security_redirect_private_and_upstream_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(302).insert_header("location", "http://[::1]/secret"))
+      .mount(&server)
+      .await;
+    let fetcher =
+      HttpFetcher::new(2, 1000, Arc::new(Allowlist::new(vec![])), true).with_trusted_first_hop();
+    assert!(matches!(
+      fetcher.fetch(&server.uri()).await,
+      Err(ProxyError::HostNotAllowed)
+    ));
+    server.reset().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(503))
+      .mount(&server)
+      .await;
+    use axum::response::IntoResponse;
+    let error = open_fetcher().fetch(&server.uri()).await.unwrap_err();
+    assert_eq!(
+      error.into_response().status(),
+      axum::http::StatusCode::BAD_GATEWAY
+    );
+  }
+
+  #[tokio::test]
+  async fn security_redirect_policy_errors() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .respond_with(ResponseTemplate::new(302).insert_header("location", server.uri().as_str()))
+      .mount(&server)
+      .await;
+    assert!(matches!(
+      open_fetcher().fetch(&server.uri()).await,
+      Err(ProxyError::TooManyRedirects)
+    ));
+    server.reset().await;
+    Mock::given(method("GET"))
+      .respond_with(
+        ResponseTemplate::new(302).insert_header("location", "http://denied.example/image.png"),
+      )
+      .mount(&server)
+      .await;
+    let fetcher = HttpFetcher::new(
+      2,
+      1000,
+      Arc::new(Allowlist::new(vec!["127.0.0.1".into()])),
+      true,
+    )
+    .with_private_ip_check(false);
+    assert!(matches!(
+      fetcher.fetch(&server.uri()).await,
+      Err(ProxyError::HostNotAllowed)
+    ));
+  }
+
   fn open_fetcher() -> HttpFetcher {
-    HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![]))).with_private_ip_check(false)
+    HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
+      .with_private_ip_check(false)
   }
 
   #[tokio::test]
@@ -251,7 +344,7 @@ mod tests {
       .mount(&server)
       .await;
     let fetcher =
-      HttpFetcher::new(10, 50, Arc::new(Allowlist::new(vec![]))).with_private_ip_check(false);
+      HttpFetcher::new(10, 50, Arc::new(Allowlist::new(vec![])), true).with_private_ip_check(false);
     let result = fetcher.fetch(&server.uri()).await;
     assert!(matches!(result, Err(ProxyError::SourceTooLarge)));
   }

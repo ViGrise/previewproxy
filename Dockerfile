@@ -51,8 +51,12 @@ RUN apt-get update -y \
 COPY --from=pdfium /usr/local/lib /usr/local/lib
 RUN ldconfig
 COPY --from=builder /app/target/release/previewproxy previewproxy
-ENV PORT=8080
-ENV APP_ENV=production
+RUN useradd --system --uid 10001 --user-group --no-create-home previewproxy \
+  && mkdir -p /tmp/previewproxy \
+  && chown previewproxy:previewproxy /tmp/previewproxy
+USER previewproxy
+ENV PP_PORT=8080
+ENV PP_APP_ENV=production
 ENV RUST_LOG="previewproxy=info,tower_http=info"
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

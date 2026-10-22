@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 #[derive(Clone)]
 pub struct AppState {
   pub cfg: Config,
+  pub allowlist: Arc<crate::modules::security::allowlist::Allowlist>,
   pub cache: Arc<CacheManager>,
   pub fetcher: Arc<dyn Fetchable>,
   pub http_fetcher: Arc<crate::modules::proxy::sources::http::HttpFetcher>,

@@ -1,9 +1,10 @@
 use crate::common::errors::ProxyError;
 use crate::modules::proxy::dto::params::{GifAnimRange, TransformParams};
+use crate::modules::proxy::dto::params::{MAX_GIF_FRAMES, MAX_IMAGE_ALLOC};
 use crate::modules::transform::ops;
 use crate::modules::transform::ops::watermark::WatermarkSpec;
 use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
-use image::{AnimationDecoder, DynamicImage, Frame};
+use image::{AnimationDecoder, DynamicImage, Frame, ImageDecoder};
 use std::io::Cursor;
 
 #[tracing::instrument(skip(src_bytes, wm_spec), fields(input_bytes = src_bytes.len()))]
@@ -16,13 +17,24 @@ pub fn run(
 ) -> Result<Vec<u8>, ProxyError> {
   // Decode all frames
   tracing::debug!("Decoding GIF animation frames");
-  let decoder = GifDecoder::new(Cursor::new(src_bytes))
+  let mut decoder = GifDecoder::new(Cursor::new(src_bytes))
     .map_err(|e| ProxyError::InternalError(e.to_string()))?;
-  tracing::trace!("Collecting frames from GIF decoder");
-  let frames: Vec<Frame> = decoder
-    .into_frames()
-    .collect_frames()
+  decoder
+    .set_limits(super::decode::image_limits())
     .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+  let mut frames = Vec::new();
+  let mut allocated = 0u64;
+  for frame in decoder.into_frames() {
+    if frames.len() >= MAX_GIF_FRAMES {
+      return Err(ProxyError::SourceTooLarge);
+    }
+    let frame = frame.map_err(|e| ProxyError::InternalError(e.to_string()))?;
+    allocated = allocated.saturating_add(frame.buffer().as_raw().len() as u64);
+    if allocated > MAX_IMAGE_ALLOC {
+      return Err(ProxyError::SourceTooLarge);
+    }
+    frames.push(frame);
+  }
   let total = frames.len();
   tracing::debug!(frame_count = total, "gif_anim: decoded frames");
 
@@ -151,6 +163,37 @@ mod tests {
   use super::*;
   use crate::modules::proxy::dto::params::TransformParams;
   use crate::modules::transform::test_helpers::tiny_gif_anim_bytes;
+
+  #[test]
+  fn security_gif_frame_and_dimension_limits() {
+    for (width, count) in [
+      (1, MAX_GIF_FRAMES + 1),
+      (
+        crate::modules::proxy::dto::params::MAX_SOURCE_DIMENSION + 1,
+        1,
+      ),
+    ] {
+      let mut bytes = Vec::new();
+      {
+        let mut encoder = GifEncoder::new(&mut bytes);
+        for _ in 0..count {
+          encoder
+            .encode_frame(Frame::new(image::RgbaImage::new(width, 1)))
+            .unwrap();
+        }
+      }
+      assert!(
+        run(
+          &bytes,
+          &GifAnimRange::All,
+          false,
+          &TransformParams::default(),
+          None
+        )
+        .is_err()
+      );
+    }
+  }
 
   fn frame_count(bytes: &[u8]) -> usize {
     let decoder = GifDecoder::new(Cursor::new(bytes)).unwrap();

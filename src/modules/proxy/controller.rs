@@ -30,6 +30,12 @@ pub fn router() -> Router<AppState> {
   Router::new()
     .route("/proxy", get(handle_query))
     .route("/{*path}", get(handle_path))
+    .layer(axum::middleware::map_response(
+      |mut response: Response| async move {
+        secure_headers(response.headers_mut());
+        response
+      },
+    ))
 }
 
 /// Handles `GET /proxy?url=...` requests.
@@ -40,32 +46,10 @@ async fn handle_query(
   State(state): State<AppState>,
   Query(query): Query<HashMap<String, String>>,
 ) -> Response {
-  let url = query.get("url").map(|s| s.as_str()).unwrap_or("");
   let queued_at = Instant::now();
   let permit = match state.concurrency.clone().try_acquire_owned() {
     Ok(p) => p,
-    Err(_) => {
-      tracing::warn!(
-        style = "query",
-        url = url,
-        "503 Service Unavailable - concurrency limit reached"
-      );
-      let resp = (
-        StatusCode::SERVICE_UNAVAILABLE,
-        [(
-          axum::http::header::HeaderName::from_static("retry-after"),
-          "1",
-        )],
-        axum::body::Body::empty(),
-      )
-        .into_response();
-      state
-        .metrics
-        .status_codes_total
-        .with_label_values(&[resp.status().as_str()])
-        .inc();
-      return resp;
-    }
+    Err(_) => return concurrency_limit_response(&state),
   };
   let resp = handle_query_inner(state.clone(), query, permit, queued_at)
     .await
@@ -91,28 +75,7 @@ async fn handle_path(
   let queued_at = Instant::now();
   let permit = match state.concurrency.clone().try_acquire_owned() {
     Ok(p) => p,
-    Err(_) => {
-      tracing::warn!(
-        style = "path",
-        path = path.as_str(),
-        "503 Service Unavailable - concurrency limit reached"
-      );
-      let resp = (
-        StatusCode::SERVICE_UNAVAILABLE,
-        [(
-          axum::http::header::HeaderName::from_static("retry-after"),
-          "1",
-        )],
-        axum::body::Body::empty(),
-      )
-        .into_response();
-      state
-        .metrics
-        .status_codes_total
-        .with_label_values(&[resp.status().as_str()])
-        .inc();
-      return resp;
-    }
+    Err(_) => return concurrency_limit_response(&state),
   };
   let resp = handle_path_inner(state.clone(), path, query, permit, queued_at)
     .await
@@ -196,6 +159,45 @@ fn is_upstream_error(e: &ProxyError) -> bool {
   )
 }
 
+fn secure_headers(headers: &mut HeaderMap) {
+  headers.insert("x-content-type-options", "nosniff".parse().unwrap());
+  if headers
+    .get(header::CONTENT_TYPE)
+    .and_then(|value| value.to_str().ok())
+    .is_some_and(|value| {
+      value
+        .split(';')
+        .next()
+        .unwrap_or(value)
+        .trim()
+        .eq_ignore_ascii_case("image/svg+xml")
+    })
+  {
+    headers.insert(
+      "content-security-policy",
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+        .parse()
+        .unwrap(),
+    );
+  }
+}
+
+fn concurrency_limit_response(state: &AppState) -> Response {
+  tracing::warn!("503 Service Unavailable - concurrency limit reached");
+  let response = (
+    StatusCode::SERVICE_UNAVAILABLE,
+    [(header::RETRY_AFTER, "1")],
+    axum::body::Body::empty(),
+  )
+    .into_response();
+  state
+    .metrics
+    .status_codes_total
+    .with_label_values(&[response.status().as_str()])
+    .inc();
+  response
+}
+
 fn build_fallback_response(fallback: &FallbackImage, err: &ProxyError, cfg: &Config) -> Response {
   let ttl = cfg.fallback_image_ttl.unwrap_or(cfg.ttl);
   let cache_control = format!("public, max-age={ttl}");
@@ -217,6 +219,7 @@ fn build_fallback_response(fallback: &FallbackImage, err: &ProxyError, cfg: &Con
   headers.insert(header::CACHE_CONTROL, cache_control.parse().unwrap());
   headers.insert("x-fallback", "true".parse().unwrap());
 
+  secure_headers(&mut headers);
   (status, headers, fallback.bytes.clone()).into_response()
 }
 
@@ -251,6 +254,7 @@ fn build_response(result: ProcessResult, cfg: &Config) -> Response {
       let mut headers = axum::http::HeaderMap::new();
       headers.insert(axum::http::header::CONTENT_TYPE, ct);
       headers.insert("x-cache", "MISS".parse().unwrap());
+      secure_headers(&mut headers);
       let mapped =
         body.map(|r| r.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>));
       (headers, axum::body::Body::from_stream(mapped)).into_response()
@@ -277,6 +281,7 @@ fn build_cached_response(entry: CacheEntry, hit: CacheHit, cfg: &Config) -> Resp
   headers.insert(header::CACHE_CONTROL, cache_control.parse().unwrap());
   headers.insert("x-cache", x_cache.parse().unwrap());
 
+  secure_headers(&mut headers);
   (headers, entry.bytes).into_response()
 }
 
@@ -294,7 +299,7 @@ mod concurrency_tests {
   use tokio::sync::Semaphore;
   use tower::ServiceExt;
 
-  fn make_state(permits: usize) -> AppState {
+  pub(super) fn make_state(permits: usize) -> AppState {
     let cfg = Arc::new(Configuration {
       env: crate::common::config::Environment::Development,
       listen_address: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8080)),
@@ -341,11 +346,12 @@ mod concurrency_tests {
       default_source_url: None,
     });
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     );
     let metrics = crate::modules::metrics::Metrics::new("");
     AppState {
+      allowlist: Arc::new(Allowlist::new(cfg.allowed_hosts.clone())),
       cache: CacheManager::new(&cfg, metrics.clone()),
       fetcher: http.clone(),
       http_fetcher: http,
@@ -885,5 +891,41 @@ mod concurrency_tests {
       .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+  }
+}
+
+#[cfg(test)]
+mod security_tests {
+  use super::*;
+  #[test]
+  fn security_svg_response_headers() {
+    let cfg = super::concurrency_tests::make_state(1).cfg;
+    let entry = CacheEntry {
+      bytes: b"<svg/>".to_vec(),
+      content_type: "image/svg+xml".into(),
+    };
+    let fallback = FallbackImage {
+      bytes: bytes::Bytes::from_static(b"<svg/>"),
+      content_type: "image/svg+xml".into(),
+    };
+    let responses = [
+      build_cached_response(entry.clone(), CacheHit::L1, &cfg),
+      build_response(ProcessResult::Cached(entry, CacheHit::Miss), &cfg),
+      build_response(
+        ProcessResult::Stream {
+          body: Box::pin(futures::stream::empty()),
+          content_type: "image/svg+xml".into(),
+        },
+        &cfg,
+      ),
+      build_fallback_response(&fallback, &ProxyError::UpstreamNotFound, &cfg),
+    ];
+    for response in responses {
+      assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+      assert_eq!(
+        response.headers()["content-security-policy"],
+        "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+      );
+    }
   }
 }

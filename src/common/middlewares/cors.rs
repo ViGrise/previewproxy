@@ -14,9 +14,14 @@ fn matches_origin(pattern: &str, origin: &str) -> bool {
     .next()
     .unwrap_or(origin);
 
-  if let Some(suffix) = pattern.strip_prefix("*.") {
-    if let Some(rest) = host.strip_suffix(suffix) {
-      let label = rest.strip_suffix('.').unwrap_or(rest);
+  let pattern = pattern.to_ascii_lowercase();
+  let host = host.to_ascii_lowercase();
+  let origin = origin.to_ascii_lowercase();
+  if let Some(suffix) = pattern
+    .strip_prefix('*')
+    .filter(|suffix| suffix.starts_with('.'))
+  {
+    if let Some(label) = host.strip_suffix(suffix) {
       return !label.is_empty() && !label.contains('.');
     }
     false
@@ -30,18 +35,12 @@ fn matches_origin(pattern: &str, origin: &str) -> bool {
 pub fn cors_layer(allow_origin: &[String], max_age_secs: u64) -> CorsLayer {
   let origin = if allow_origin.iter().any(|o| o == "*") {
     AllowOrigin::any()
-  } else if allow_origin.iter().any(|o| o.contains("*.")) {
+  } else {
     let patterns: Vec<String> = allow_origin.to_vec();
     AllowOrigin::predicate(move |origin: &HeaderValue, _| {
       let s = origin.to_str().unwrap_or("");
       patterns.iter().any(|p| matches_origin(p, s))
     })
-  } else {
-    AllowOrigin::list(
-      allow_origin
-        .iter()
-        .filter_map(|o| o.parse::<HeaderValue>().ok()),
-    )
   };
 
   let layer = CorsLayer::new()
@@ -51,4 +50,15 @@ pub fn cors_layer(allow_origin: &[String], max_age_secs: u64) -> CorsLayer {
     .max_age(Duration::from_secs(max_age_secs));
   debug!(max_age_secs, "CORS headers applied");
   layer
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  #[test]
+  fn security_wildcard_boundary_and_case() {
+    assert!(!matches_origin("*.example.com", "https://evilexample.com"));
+    assert!(matches_origin("*.example.com", "https://WWW.EXAMPLE.COM"));
+    assert!(!matches_origin("*.example.com", "https://a.b.example.com"));
+  }
 }

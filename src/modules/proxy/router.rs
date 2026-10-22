@@ -85,7 +85,7 @@ mod tests {
 
   fn make_http_fetcher() -> Arc<HttpFetcher> {
     Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     )
   }
@@ -195,7 +195,7 @@ mod tests {
     use crate::modules::proxy::sources::AliasSource;
     use crate::modules::security::allowlist::Allowlist;
     let http = Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     );
     let mut map = std::collections::HashMap::new();

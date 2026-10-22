@@ -349,7 +349,7 @@ mod tests {
   fn test_fetcher() -> Arc<dyn Fetchable> {
     use crate::modules::proxy::sources::http::HttpFetcher;
     Arc::new(
-      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])))
+      HttpFetcher::new(10, 1_000_000, Arc::new(Allowlist::new(vec![])), true)
         .with_private_ip_check(false),
     )
   }

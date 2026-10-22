@@ -20,11 +20,22 @@ pub fn dispatch(mime: &str, bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
 
 fn decode_via_image_crate(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
   tracing::trace!("Decoding image using the image crate");
-  image::ImageReader::new(Cursor::new(bytes))
+  let mut reader = image::ImageReader::new(Cursor::new(bytes))
     .with_guessed_format()
-    .map_err(|e| ProxyError::InternalError(e.to_string()))?
+    .map_err(|e| ProxyError::InternalError(e.to_string()))?;
+  reader.limits(image_limits());
+  reader
     .decode()
     .map_err(|e| ProxyError::InternalError(e.to_string()))
+}
+
+pub(crate) fn image_limits() -> image::Limits {
+  use crate::modules::proxy::dto::params::{MAX_IMAGE_ALLOC, MAX_SOURCE_DIMENSION};
+  let mut limits = image::Limits::default();
+  limits.max_image_width = Some(MAX_SOURCE_DIMENSION);
+  limits.max_image_height = Some(MAX_SOURCE_DIMENSION);
+  limits.max_alloc = Some(MAX_IMAGE_ALLOC);
+  limits
 }
 
 fn decode_svg(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
@@ -129,24 +140,29 @@ fn decode_heic(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
 
 fn decode_pdf(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
   use pdfium_render::prelude::*;
-  use std::cell::RefCell;
+  use std::{cell::RefCell, mem::ManuallyDrop, sync::Mutex};
 
   // PDFium is a C library with global process state - it cannot be re-initialized
-  // after being dropped. Use a thread-local so each spawn_blocking worker thread
-  // initializes it exactly once and reuses it for the process lifetime.
+  // after being dropped. The lock serializes initialization and rendering across
+  // threads, and each spawn_blocking worker thread initializes its binding once.
+  static PDFIUM_LOCK: Mutex<()> = Mutex::new(());
+  let _guard = PDFIUM_LOCK
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner);
   thread_local! {
-    static PDFIUM: RefCell<Option<Pdfium>> = const { RefCell::new(None) };
+    // Bindings live for the process lifetime, including worker thread teardown.
+    static PDFIUM: RefCell<Option<ManuallyDrop<Pdfium>>> = const { RefCell::new(None) };
   }
 
   PDFIUM.with(|cell| {
     let mut slot = cell.borrow_mut();
     if slot.is_none() {
       tracing::trace!("Initializing PDFium (once per thread)");
-      *slot = Some(Pdfium::new(
+      *slot = Some(ManuallyDrop::new(Pdfium::new(
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
           .or_else(|_| Pdfium::bind_to_system_library())
           .map_err(|_| ProxyError::PdfRenderError)?,
-      ));
+      )));
     }
     let pdfium = slot.as_ref().unwrap();
 
@@ -177,6 +193,16 @@ fn decode_pdf(bytes: &[u8]) -> Result<DynamicImage, ProxyError> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn security_image_dimension_limit() {
+    use crate::modules::proxy::dto::params::MAX_SOURCE_DIMENSION;
+    let mut bytes = Cursor::new(Vec::new());
+    DynamicImage::new_rgba8(MAX_SOURCE_DIMENSION + 1, 1)
+      .write_to(&mut bytes, image::ImageFormat::Png)
+      .unwrap();
+    assert!(decode_via_image_crate(bytes.get_ref()).is_err());
+  }
 
   fn minimal_svg() -> Vec<u8> {
     br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">

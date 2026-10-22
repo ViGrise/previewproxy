@@ -25,18 +25,22 @@ impl Fetchable for LocalSource {
     let path_str = url.strip_prefix("local:/").unwrap_or(url);
     tracing::debug!(path = path_str, "local fetch start");
     let path = PathBuf::from(path_str);
+    if path.is_absolute()
+      || path
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+      || super::alias::validate_source_path(path_str).is_err()
+    {
+      return Err(ProxyError::UpstreamNotFound);
+    }
     let resolved = self.base_dir.join(&path);
 
-    let canonical = tokio::fs::canonicalize(&resolved).await.map_err(|e| {
-      if e.kind() == std::io::ErrorKind::NotFound {
-        ProxyError::UpstreamNotFound
-      } else {
-        ProxyError::InternalError(e.to_string())
-      }
-    })?;
+    let canonical = tokio::fs::canonicalize(&resolved)
+      .await
+      .map_err(|_| ProxyError::UpstreamNotFound)?;
 
     if !canonical.starts_with(&self.base_dir) {
-      return Err(ProxyError::InvalidParams("path not allowed".to_string()));
+      return Err(ProxyError::UpstreamNotFound);
     }
 
     let metadata = tokio::fs::metadata(&canonical)
@@ -102,8 +106,8 @@ mod tests {
     let result = source.fetch(&url).await;
 
     match result {
-      Err(ProxyError::InvalidParams(msg)) => assert_eq!(msg, "path not allowed"),
-      other => panic!("expected InvalidParams(path not allowed), got {:?}", other),
+      Err(ProxyError::UpstreamNotFound) => {}
+      other => panic!("expected UpstreamNotFound, got {:?}", other),
     }
   }
 
@@ -124,8 +128,8 @@ mod tests {
     let result = source.fetch("local:/escape.jpg").await;
 
     match result {
-      Err(ProxyError::InvalidParams(msg)) => assert_eq!(msg, "path not allowed"),
-      other => panic!("expected InvalidParams(path not allowed), got {:?}", other),
+      Err(ProxyError::UpstreamNotFound) => {}
+      other => panic!("expected UpstreamNotFound, got {:?}", other),
     }
   }
 
